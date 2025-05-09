@@ -50,7 +50,7 @@ export function AppSidebar({
 }: SidebarNavProps) {
 
   return (
-    <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r border-sidebar-border">
+    <Sidebar collapsible="none" variant="sidebar" side="left" className="border-r border-sidebar-border">
       <SidebarHeader className="p-4 items-center">
         <div className="flex items-center gap-2">
           <ShapeTalkLogo className="w-8 h-8 text-primary" />
