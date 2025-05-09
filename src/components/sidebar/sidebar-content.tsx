@@ -26,7 +26,7 @@ interface SidebarNavProps {
   activeChannelId: string | null;
   onSelectChannel: (channelId: string) => void;
   onOpenSettings: () => void;
-  onAddChannel: () // placeholder
+  onAddChannel: () => void; // placeholder - fixed syntax
 }
 
 export function AppSidebar({
