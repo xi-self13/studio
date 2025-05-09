@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -11,11 +10,11 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Separator } from "@/components/ui/separator"
-import { Sheet, SheetContent as SheetContentPrimitive } from "@/components/ui/sheet" // Renamed to avoid conflict
+import { Sheet, SheetContent as SheetContentPrimitive, SheetTitle } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Tooltip,
-  TooltipContent as TooltipContentPrimitive, // Renamed to avoid conflict
+  TooltipContent as TooltipContentPrimitive,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
@@ -83,9 +82,12 @@ const SidebarProvider = React.forwardRef<
         if (cookieValue !== undefined) {
           const persistedOpenState = cookieValue === 'true';
           _setOpen(persistedOpenState);
+        } else {
+          // If no cookie, set based on defaultOpen (which is true for desktop)
+           _setOpen(isMobile ? false : defaultOpen);
         }
       }
-    }, [openProp]); 
+    }, [openProp, defaultOpen, isMobile]); 
 
     const setOpen = React.useCallback(
       (value: boolean | ((prev: boolean) => boolean)) => {
@@ -133,7 +135,7 @@ const SidebarProvider = React.forwardRef<
         state,
         open,
         setOpen,
-        isMobile: isMobile === true, // Ensure boolean
+        isMobile: isMobile === true, 
         openMobile,
         setOpenMobile,
         toggleSidebar,
@@ -187,7 +189,7 @@ const Sidebar = React.forwardRef<
     },
     ref
   ) => {
-    const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+    const { isMobile, state, openMobile, setOpenMobile, open } = useSidebar()
 
     if (collapsible === "none") {
       return (
@@ -205,7 +207,7 @@ const Sidebar = React.forwardRef<
     }
     
     if (isMobile === undefined) {
-      return null; // Or a loader, to prevent rendering issues until isMobile is known
+      return null; 
     }
 
     if (isMobile) {
@@ -222,6 +224,8 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
+            {/* Visually hidden title for accessibility */}
+            <SheetTitle className="sr-only">Sidebar Navigation</SheetTitle>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContentPrimitive>
         </Sheet>
@@ -232,30 +236,29 @@ const Sidebar = React.forwardRef<
       <div
         ref={ref}
         className="group peer hidden md:block text-sidebar-foreground"
-        data-state={state}
-        data-collapsible={state === "collapsed" ? collapsible : ""}
+        data-state={open ? "expanded" : "collapsed"} // Use `open` directly for desktop state
+        data-collapsible={(open ? "expanded" : "collapsed") === "collapsed" ? collapsible : ""}
         data-variant={variant}
         data-side={side}
       >
         <div
           className={cn(
-            "duration-200 relative h-svh w-[--sidebar-width] bg-transparent transition-[width] ease-linear",
+            "duration-200 relative h-svh bg-transparent transition-[width] ease-linear",
             "group-data-[collapsible=offcanvas]:w-0",
             "group-data-[side=right]:rotate-180",
-            variant === "floating" || variant === "inset"
-              ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon]"
+             open ? "w-[--sidebar-width]" : (variant === "floating" || variant === "inset" ? "w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4))]" : "w-[--sidebar-width-icon]")
           )}
         />
         <div
           className={cn(
-            "duration-200 fixed inset-y-0 z-10 hidden h-svh w-[--sidebar-width] transition-[left,right,width] ease-linear md:flex",
+            "duration-200 fixed inset-y-0 z-10 hidden h-svh transition-[left,right,width] ease-linear md:flex",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+              ? "left-0 group-data-[collapsible=offcanvas]:group-data-[state=collapsed]:left-[calc(var(--sidebar-width)*-1)]" 
+              : "right-0 group-data-[collapsible=offcanvas]:group-data-[state=collapsed]:right-[calc(var(--sidebar-width)*-1)]",
+            open ? "w-[--sidebar-width]" : (variant === "floating" || variant === "inset" ? "w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+_2px)]" : "w-[--sidebar-width-icon]"),
             variant === "floating" || variant === "inset"
-              ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
-              : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
+              ? "p-2"
+              : "group-data-[side=left]:border-r group-data-[side=right]:border-l",
             className
           )}
           {...props}
@@ -311,7 +314,7 @@ const MobileSidebarTrigger = React.forwardRef<
       data-sidebar="mobile-trigger"
       variant="ghost"
       size="icon"
-      className={cn("h-7 w-7", className)}
+      className={cn("h-7 w-7 md:hidden", className)} // Ensure it's hidden on desktop
       onClick={(event) => {
         onClick?.(event);
         setOpenMobile(prev => !prev);
