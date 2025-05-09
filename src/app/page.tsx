@@ -7,7 +7,9 @@ import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { PanelLeft, Bot, LogIn, LogOut } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { PanelLeft, Bot, LogIn, LogOut, Mail, KeyRound, UserPlus } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react'; 
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
@@ -16,7 +18,8 @@ import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth } from '@/lib/firebase';
-import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
+import { Separator } from '@/components/ui/separator';
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // For the default bot using env vars
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID (uid) for the default bot
@@ -33,6 +36,10 @@ export default function ShapeTalkPage() {
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
   const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const { toast } = useToast();
 
@@ -92,7 +99,7 @@ export default function ShapeTalkPage() {
       if (firebaseUser) {
         const appUser: User = {
           uid: firebaseUser.uid,
-          name: firebaseUser.displayName || 'Anonymous User',
+          name: firebaseUser.displayName || firebaseUser.email || 'Anonymous User', // Use email if display name is null
           avatarUrl: firebaseUser.photoURL,
           email: firebaseUser.email,
           isBot: false,
@@ -109,6 +116,7 @@ export default function ShapeTalkPage() {
         if (!activeChannelId && channels.length > 0) {
           setActiveChannelId(channels[0].id);
         }
+        setAuthError(null); // Clear any previous auth errors
       } else {
         setCurrentUser(null);
         setUsers(prevUsers => prevUsers.filter(u => u.isBot)); // Keep only bot users if logged out
@@ -118,23 +126,94 @@ export default function ShapeTalkPage() {
     return () => unsubscribe();
   }, [activeChannelId, channels]);
 
-  const handleLogin = async () => {
+  const handleFirebaseAuthError = (error: any, actionType: "Login" | "Sign Up") => {
+    console.error(`${actionType} error:`, error);
+    let description = `An unknown error occurred during ${actionType.toLowerCase()}.`;
+    let title = `${actionType} Failed`;
+
+    switch (error.code) {
+      case 'auth/unauthorized-domain':
+        description = "This domain is not authorized for Firebase Authentication. Please add it to your Firebase project's 'Authorized domains' list (e.g., localhost).";
+        break;
+      case 'auth/invalid-api-key':
+        description = "Invalid Firebase API Key. Please check your Firebase project configuration and environment variables.";
+        break;
+      case 'auth/invalid-email':
+        description = "The email address is not valid.";
+        break;
+      case 'auth/user-disabled':
+        description = "This user account has been disabled.";
+        break;
+      case 'auth/user-not-found':
+        description = "No user found with this email. Please sign up or check your email.";
+        break;
+      case 'auth/wrong-password':
+        description = "Incorrect password. Please try again.";
+        break;
+      case 'auth/email-already-in-use':
+        description = "This email address is already in use by another account.";
+        break;
+      case 'auth/weak-password':
+        description = "The password is too weak. Please choose a stronger password (at least 6 characters).";
+        break;
+      case 'auth/operation-not-allowed':
+        description = "Email/password accounts are not enabled. Please enable it in the Firebase Console.";
+        break;
+      default:
+        if (error.message) {
+          description = error.message;
+        }
+    }
+    setAuthError(description); // Display error on form
+    toast({ title, description, variant: "destructive", duration: 7000 });
+  };
+
+  const handleGoogleLogin = async () => {
     setIsLoadingAuth(true);
+    setAuthError(null);
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(auth, provider);
       toast({ title: "Logged In", description: "Welcome!" });
     } catch (error: any) {
-      console.error("Login error:", error);
-      let description = "An unknown error occurred during login.";
-      if (error.code === 'auth/unauthorized-domain') {
-        description = "This domain is not authorized for Firebase Authentication. Please add it to your Firebase project's 'Authorized domains' list in Authentication -> Sign-in method settings (e.g., localhost).";
-      } else if (error.code === 'auth/invalid-api-key') {
-        description = "Invalid Firebase API Key. Please check your Firebase project configuration and environment variables.";
-      } else if (error.message) {
-        description = error.message;
-      }
-      toast({ title: "Login Failed", description, variant: "destructive", duration: 10000 });
+      handleFirebaseAuthError(error, "Login");
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const handleEmailPasswordSignIn = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!email || !password) {
+      setAuthError("Please enter both email and password.");
+      return;
+    }
+    setIsLoadingAuth(true);
+    setAuthError(null);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      toast({ title: "Logged In", description: "Welcome!" });
+    } catch (error: any) {
+      handleFirebaseAuthError(error, "Login");
+    } finally {
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const handleEmailPasswordSignUp = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!email || !password) {
+      setAuthError("Please enter both email and password to sign up.");
+      return;
+    }
+    setIsLoadingAuth(true);
+    setAuthError(null);
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      // onAuthStateChanged will handle setting the current user
+      toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
+    } catch (error: any) {
+      handleFirebaseAuthError(error, "Sign Up");
     } finally {
       setIsLoadingAuth(false);
     }
@@ -143,8 +222,12 @@ export default function ShapeTalkPage() {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      setEmail('');
+      setPassword('');
+      setAuthError(null);
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
-    } catch (error: any) {
+    } catch (error: any)
+ {
       console.error("Logout error:", error);
       let description = "An unknown error occurred during logout.";
       if (error.message) {
@@ -342,7 +425,7 @@ export default function ShapeTalkPage() {
 
   const activeChannelDetails = currentUser ? [...channels, ...directMessages].find(c => c.id === activeChannelId) || null : null;
 
-  if (isLoadingAuth && !currentUser) { // Show loading only if no user yet and still loading
+  if (isLoadingAuth && !currentUser) { 
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground">
         <ShapeTalkLogo className="w-24 h-24 text-primary mb-6 animate-pulse" />
@@ -353,15 +436,69 @@ export default function ShapeTalkPage() {
 
   if (!currentUser) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground">
-        <ShapeTalkLogo className="w-24 h-24 text-primary mb-6" />
-        <h1 className="text-3xl font-semibold mb-2">Welcome to ShapeTalk</h1>
-        <p className="text-muted-foreground mb-8">Chat with AI, discuss shapes, and connect.</p>
-        <Button onClick={handleLogin} size="lg" disabled={isLoadingAuth}>
-          {isLoadingAuth ? <PanelLeft className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
-           Sign in with Google
-        </Button>
-         <footer className="absolute bottom-4 text-xs text-muted-foreground">
+      <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground p-4">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="text-center">
+            <ShapeTalkLogo className="w-20 h-20 text-primary mb-4 mx-auto" />
+            <h1 className="text-3xl font-semibold mb-1">Welcome to ShapeTalk</h1>
+            <p className="text-muted-foreground">Chat with AI, discuss shapes, and connect.</p>
+          </div>
+
+          <form onSubmit={handleEmailPasswordSignIn} className="space-y-4">
+            <div>
+              <Label htmlFor="email">Email</Label>
+              <Input 
+                id="email" 
+                type="email" 
+                placeholder="you@example.com" 
+                value={email} 
+                onChange={(e) => setEmail(e.target.value)} 
+                required 
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="password">Password</Label>
+              <Input 
+                id="password" 
+                type="password" 
+                placeholder="••••••••" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                required 
+                className="mt-1"
+              />
+            </div>
+            {authError && <p className="text-sm text-destructive">{authError}</p>}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button type="submit" className="flex-1" disabled={isLoadingAuth}>
+                {isLoadingAuth ? <PanelLeft className="mr-2 h-4 w-4 animate-spin" /> : <Mail className="mr-2 h-4 w-4" />} 
+                Sign In with Email
+              </Button>
+              <Button type="button" variant="outline" onClick={handleEmailPasswordSignUp} className="flex-1" disabled={isLoadingAuth}>
+                {isLoadingAuth ? <PanelLeft className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}
+                Sign Up with Email
+              </Button>
+            </div>
+          </form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <Separator />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">
+                Or
+              </span>
+            </div>
+          </div>
+
+          <Button onClick={handleGoogleLogin} variant="outline" className="w-full" disabled={isLoadingAuth}>
+            {isLoadingAuth ? <PanelLeft className="mr-2 h-4 w-4 animate-spin" /> : <LogIn className="mr-2 h-4 w-4" />}
+            Sign in with Google
+          </Button>
+        </div>
+        <footer className="absolute bottom-4 text-xs text-muted-foreground">
             © {new Date().getFullYear()} ShapeTalk. Shapes.inc integration for demo purposes.
         </footer>
       </div>
@@ -410,3 +547,4 @@ export default function ShapeTalkPage() {
   );
 }
 
+    
