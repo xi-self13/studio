@@ -4,11 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { Message, User, Channel } from '@/types';
 import { MessageItem } from './message-item';
 import { MessageInput } from './message-input';
-import { ImageGeneratorDialog } from '@/components/ai/image-generator-dialog';
+import { AiChatDialog } from '@/components/ai/image-generator-dialog'; // Path remains same, component name inside is AiChatDialog
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Hash, Users, AtSign, Bot } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Hash, Users, AtSign, MessageCircle, Sparkles } from 'lucide-react'; // Added MessageCircle, Sparkles
 
 interface ChatViewProps {
   activeChannel: Channel | null;
@@ -16,7 +16,7 @@ interface ChatViewProps {
   currentUser: User;
   users: User[]; // All users, for fetching sender details
   onSendMessage: (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
-  onSendAiImageMessage: (channelId: string, imageData: { imageUrl: string; prompt: string; sourceShapeId: string }) => Promise<void>;
+  onSendAiResponseMessage: (channelId: string, responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => Promise<void>;
 }
 
 export function ChatView({ 
@@ -25,11 +25,11 @@ export function ChatView({
   currentUser, 
   users,
   onSendMessage,
-  onSendAiImageMessage
+  onSendAiResponseMessage
 }: ChatViewProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const [isImageGeneratorOpen, setIsImageGeneratorOpen] = useState(false);
+  const [isAiChatDialogOpen, setIsAiChatDialogOpen] = useState(false);
 
   useEffect(() => {
     if (viewportRef.current) {
@@ -40,18 +40,22 @@ export function ChatView({
   if (!activeChannel) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background p-4 text-muted-foreground">
-        <MessageCircleIcon className="w-16 h-16 mb-4" />
+        <MessageCircle className="w-16 h-16 mb-4" />
         <h2 className="text-xl font-semibold">Select a channel to start chatting</h2>
-        <p className="text-sm">Or generate an image with our AI!</p>
-         <Button onClick={() => setIsImageGeneratorOpen(true)} className="mt-4">Generate AI Image</Button>
-         <ImageGeneratorDialog 
-            isOpen={isImageGeneratorOpen} 
-            onOpenChange={setIsImageGeneratorOpen}
-            onImageGenerated={async (imageData) => {
-              // Cannot send AI image if no channel is active, handle this scenario
-              // For now, let's assume we'd need a default channel or user flow for this
-              console.warn("AI Image generated but no active channel to post to.");
+        <p className="text-sm">Or talk to our AI about shapes!</p>
+         <Button onClick={() => setIsAiChatDialogOpen(true)} className="mt-4" variant="outline">
+           <Sparkles className="mr-2 h-4 w-4" /> Chat with AI
+         </Button>
+         <AiChatDialog 
+            isOpen={isAiChatDialogOpen} 
+            onOpenChange={setIsAiChatDialogOpen}
+            onAiResponse={async (responseData) => {
+              // This case should ideally be prevented by disabling the button if no channel is active.
+              // For now, we'll rely on the dialog itself or the button click handler to manage this.
+              console.warn("AI Response received but no active channel to post to. This should not happen if button is disabled.");
             }}
+            currentUserId={currentUser.id}
+            activeChannelId={null} // Pass null if no active channel, dialog should handle this
           />
       </div>
     );
@@ -112,33 +116,18 @@ export function ChatView({
       
       <MessageInput 
         onSendMessage={(content) => onSendMessage(activeChannel.id, content)} 
-        onOpenImageGenerator={() => setIsImageGeneratorOpen(true)}
+        onOpenAiChat={() => setIsAiChatDialogOpen(true)}
+        disabled={!activeChannel}
       />
-      <ImageGeneratorDialog 
-        isOpen={isImageGeneratorOpen} 
-        onOpenChange={setIsImageGeneratorOpen}
-        onImageGenerated={(imageData) => onSendAiImageMessage(activeChannel.id, imageData)}
-      />
+      {activeChannel && (
+        <AiChatDialog 
+          isOpen={isAiChatDialogOpen} 
+          onOpenChange={setIsAiChatDialogOpen}
+          onAiResponse={(responseData) => onSendAiResponseMessage(activeChannel.id, responseData)}
+          currentUserId={currentUser.id}
+          activeChannelId={activeChannel.id}
+        />
+      )}
     </div>
   );
-}
-
-
-function MessageCircleIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z" />
-    </svg>
-  )
 }

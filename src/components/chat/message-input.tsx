@@ -6,15 +6,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ShapePalette } from '@/components/shape/shape-palette';
 import type { Shape } from '@/types';
-import { Send, Smile, Wand2, Loader2 } from 'lucide-react';
+import { Send, Smile, Sparkles, Loader2 } from 'lucide-react'; // Changed Wand2 to Sparkles
 
 interface MessageInputProps {
   onSendMessage: (content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
-  onOpenImageGenerator: () => void;
+  onOpenAiChat: () => void; // Renamed from onOpenImageGenerator
   disabled?: boolean;
 }
 
-export function MessageInput({ onSendMessage, onOpenImageGenerator, disabled = false }: MessageInputProps) {
+export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: MessageInputProps) {
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isShapePaletteOpen, setIsShapePaletteOpen] = useState(false);
@@ -66,9 +66,9 @@ export function MessageInput({ onSendMessage, onOpenImageGenerator, disabled = f
             <ShapePalette onSelectShape={handleSendShape} />
           </PopoverContent>
         </Popover>
-        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary" onClick={onOpenImageGenerator} disabled={disabled || isSending}>
-          <Wand2 />
-          <span className="sr-only">Generate AI Image</span>
+        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-primary" onClick={onOpenAiChat} disabled={disabled || isSending}>
+          <Sparkles /> 
+          <span className="sr-only">Chat with AI</span>
         </Button>
         <Textarea
           value={text}

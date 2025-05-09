@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import type { Channel, Message, User, Shape } from '@/types';
+import type { Channel, Message, User } from '@/types';
 import { PREDEFINED_SHAPES } from '@/lib/shapes';
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
-import { SidebarProvider, SidebarInset, SidebarTrigger, useSidebar } from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { PanelLeft } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
@@ -22,12 +22,12 @@ const mockUsers: User[] = [
   mockCurrentUser,
   { id: 'user2', name: 'Alice', avatarUrl: 'https://picsum.photos/seed/alice/40/40' },
   { id: 'user3', name: 'Bob', avatarUrl: 'https://picsum.photos/seed/bob/40/40' },
-  { id: 'AI_BOT', name: 'AI Bot', avatarUrl: '' }, // AI Bot doesn't need a real avatarUrl here
+  { id: 'AI_BOT', name: 'AI Bot', avatarUrl: '' }, 
 ];
 
 const initialChannels: Channel[] = [
   { id: 'general', name: 'general', type: 'channel', icon: Hash },
-  { id: 'shapes', name: 'shapes-art', type: 'channel', icon: Bot }, // Using Bot icon for AI-related
+  { id: 'shapes-ai', name: 'shapes-ai-chat', type: 'channel', icon: Bot }, 
   { id: 'random', name: 'random', type: 'channel', icon: Hash },
 ];
 
@@ -72,16 +72,16 @@ export default function ShapeTalkPage() {
     setMessages(prev => [...prev, newMessage]);
   };
 
-  const handleSendAiImageMessage = async (channelId: string, imageData: { imageUrl: string; prompt: string; sourceShapeId: string }) => {
+  const handleSendAiResponseMessage = async (channelId: string, aiData: { textResponse: string; prompt: string; sourceShapeId: string }) => {
     const newMessage: Message = {
       id: `ai_msg_${Date.now()}`,
       channelId,
       userId: 'AI_BOT',
       content: { 
-        type: 'ai_image', 
-        imageUrl: imageData.imageUrl,
-        prompt: imageData.prompt,
-        sourceShapeId: imageData.sourceShapeId,
+        type: 'ai_response', 
+        textResponse: aiData.textResponse,
+        prompt: aiData.prompt,
+        sourceShapeId: aiData.sourceShapeId,
       },
       timestamp: Date.now(),
     };
@@ -111,7 +111,6 @@ export default function ShapeTalkPage() {
           onAddChannel={handleAddChannel}
         />
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
-          {/* This trigger is for mobile/collapsible sidebar if not using the built-in rail */}
           <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
              <SidebarTrigger className="h-8 w-8">
                 <PanelLeft />
@@ -123,7 +122,7 @@ export default function ShapeTalkPage() {
             currentUser={mockCurrentUser}
             users={mockUsers}
             onSendMessage={handleSendMessage}
-            onSendAiImageMessage={handleSendAiImageMessage}
+            onSendAiResponseMessage={handleSendAiResponseMessage}
           />
         </SidebarInset>
       </div>

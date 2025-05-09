@@ -13,7 +13,12 @@ export interface Shape {
 export type MessageContent = 
   | { type: 'text'; text: string }
   | { type: 'shape'; shapeId: string }
-  | { type: 'ai_image'; imageUrl: string; prompt?: string; sourceShapeId?: string };
+  | { 
+      type: 'ai_response'; 
+      textResponse: string; // Text response from the AI
+      prompt?: string; // Original user prompt that led to this AI response
+      sourceShapeId?: string; // ID of the shape that was part of the prompt
+    };
 
 export interface Message {
   id: string;

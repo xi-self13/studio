@@ -4,9 +4,10 @@ import type { Message, User } from '@/types';
 import { getShapeById } from '@/lib/shapes';
 import { ShapeDisplay } from '@/components/shape/shape-display';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import Image from 'next/image';
 import { format } from 'date-fns';
 import { Bot } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
 
 interface MessageItemProps {
   message: Message;
@@ -46,10 +47,8 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
             {format(new Date(message.timestamp), 'p')}
           </span>
         </div>
-        <div className={`mt-1 p-2 rounded-lg max-w-md lg:max-w-lg xl:max-w-xl break-words ${
-          isOwnMessage 
-            ? 'bg-primary text-primary-foreground' 
-            : (message.content.type === 'ai_image' ? 'bg-card' : 'bg-secondary text-secondary-foreground')
+        <div className={`mt-1 max-w-md lg:max-w-lg xl:max-w-xl break-words ${
+           message.content.type !== 'ai_response' && (isOwnMessage ? 'bg-primary text-primary-foreground rounded-lg p-2' : 'bg-secondary text-secondary-foreground rounded-lg p-2')
         }`}>
           {message.content.type === 'text' && <p className="text-sm whitespace-pre-wrap">{message.content.text}</p>}
           {message.content.type === 'shape' && (
@@ -66,23 +65,29 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
               );
             }
           )()}
-          {message.content.type === 'ai_image' && (
-            <div className="space-y-2">
-              {message.content.prompt && (
-                 <p className="text-xs italic text-muted-foreground">
-                  Prompt: "{message.content.prompt}"
-                  {message.content.sourceShapeId && ` with ${getShapeById(message.content.sourceShapeId)?.name || 'shape'}`}
-                 </p>
-              )}
-              {/* Using <img> for data URI as next/image optimization isn't ideal here */}
-              <img 
-                src={message.content.imageUrl} 
-                alt={message.content.prompt || 'AI Generated Image'} 
-                className="rounded-md max-w-full h-auto object-contain"
-                data-ai-hint="generated art"
-                style={{ maxHeight: '300px' }}
-              />
-            </div>
+          {message.content.type === 'ai_response' && (
+            <Card className="bg-card shadow-md">
+              <CardHeader className="pb-2 pt-3 px-4">
+                {message.content.prompt && (
+                  <CardDescription className="text-xs italic">
+                    You asked about "{message.content.prompt}"
+                    {message.content.sourceShapeId && ` regarding the ${getShapeById(message.content.sourceShapeId)?.name || 'shape'}.`}
+                  </CardDescription>
+                )}
+              </CardHeader>
+              <CardContent className="px-4 pb-3 space-y-2">
+                <p className="text-sm whitespace-pre-wrap text-card-foreground">{message.content.textResponse}</p>
+                {message.content.sourceShapeId && (() => {
+                  const shape = getShapeById(message.content.sourceShapeId);
+                  return shape ? (
+                    <div className="flex items-center gap-2 mt-2">
+                       <ShapeDisplay svgString={shape.svgString} size={32} color="hsl(var(--card-foreground))" />
+                       <span className="text-xs text-muted-foreground">Related shape: {shape.name}</span>
+                    </div>
+                  ) : null;
+                })()}
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>

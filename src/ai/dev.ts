@@ -1,4 +1,4 @@
 import { config } from 'dotenv';
 config();
 
-import '@/ai/flows/generate-image-with-shape.ts';
+import '@/ai/flows/chat-with-shape-flow.ts';

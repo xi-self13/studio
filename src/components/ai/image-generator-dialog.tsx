@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { generateImageWithShape } from '@/ai/flows/generate-image-with-shape';
-import { PREDEFINED_SHAPES, getShapeById, type Shape } from '@/lib/shapes';
+import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
+import { PREDEFINED_SHAPES, getShapeById } from '@/lib/shapes';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,37 +24,37 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { ShapePalette } from '@/components/shape/shape-palette';
 import { useToast } from '@/hooks/use-toast';
-import { Wand2, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { MessageSquareText, Loader2, Sparkles } from 'lucide-react'; // Changed Wand2 to Sparkles / MessageSquareText
 
 const formSchema = z.object({
   promptText: z.string().min(1, 'Prompt is required.'),
-  shapeId: z.string().min(1, 'Please select a shape.'),
+  shapeId: z.string().min(1, 'Please select a shape to discuss.'),
 });
 
-type ImageGeneratorFormValues = z.infer<typeof formSchema>;
+type AiChatFormValues = z.infer<typeof formSchema>;
 
-interface ImageGeneratorDialogProps {
+interface AiChatDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
-  onImageGenerated: (imageData: { imageUrl: string; prompt: string; sourceShapeId: string }) => void;
+  onAiResponse: (responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => void;
+  currentUserId: string;
+  activeChannelId: string | null;
 }
 
-export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }: ImageGeneratorDialogProps) {
+export function AiChatDialog({ 
+  isOpen, 
+  onOpenChange, 
+  onAiResponse,
+  currentUserId,
+  activeChannelId 
+}: AiChatDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
-  // Client-side btoa function
-  const [btoaFn, setBtoaFn] = useState<((str: string) => string) | null>(null);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setBtoaFn(() => window.btoa);
-    }
-  }, []);
-
-  const form = useForm<ImageGeneratorFormValues>({
+  const form = useForm<AiChatFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       promptText: '',
@@ -62,9 +62,9 @@ export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }:
     },
   });
 
-  const onSubmit: SubmitHandler<ImageGeneratorFormValues> = async (data) => {
-    if (!btoaFn) {
-      toast({ title: "Error", description: "Client environment not ready.", variant: "destructive" });
+  const onSubmit: SubmitHandler<AiChatFormValues> = async (data) => {
+    if (!activeChannelId) {
+      toast({ title: "Error", description: "No active channel selected to send the AI response.", variant: "destructive" });
       return;
     }
 
@@ -76,26 +76,26 @@ export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }:
         setIsLoading(false);
         return;
       }
-
-      const shapeDataUri = `data:image/svg+xml;base64,${btoaFn(selectedShape.svgString)}`;
       
-      const result = await generateImageWithShape({
+      const result = await chatWithShape({
         promptText: data.promptText,
-        shapeDataUri,
+        shapeId: data.shapeId,
+        userId: currentUserId,
+        channelId: activeChannelId,
       });
 
-      onImageGenerated({ 
-        imageUrl: result.imageDataUri, 
+      onAiResponse({ 
+        textResponse: result.responseText, 
         prompt: data.promptText, 
         sourceShapeId: data.shapeId 
       });
-      toast({ title: "Success!", description: "Image generated and added to chat." });
+      toast({ title: "Success!", description: "AI response received and added to chat." });
       onOpenChange(false);
       form.reset();
     } catch (error) {
-      console.error("Error generating image:", error);
+      console.error("Error getting AI response:", error);
       toast({
-        title: "Error Generating Image",
+        title: "Error Contacting AI",
         description: error instanceof Error ? error.message : "An unknown error occurred.",
         variant: "destructive",
       });
@@ -111,11 +111,11 @@ export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }:
         if (!open) form.reset();
       }
     }}>
-      <DialogContent className="sm:max-w-[425px] bg-card">
+      <DialogContent className="sm:max-w-md bg-card">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Wand2 className="text-primary" /> AI Image Generator</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><MessageSquareText className="text-primary" /> Chat with AI about a Shape</DialogTitle>
           <DialogDescription>
-            Create an image with AI, incorporating a selected shape.
+            Ask the AI something related to the selected shape or your prompt.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -125,9 +125,9 @@ export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }:
               name="promptText"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Image Prompt</FormLabel>
+                  <FormLabel>Your Message to AI</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., A futuristic city skyline" {...field} />
+                    <Textarea placeholder="e.g., Tell me a story about this shape" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -138,12 +138,12 @@ export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }:
               name="shapeId"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Incorporate Shape</FormLabel>
+                  <FormLabel>Discuss this Shape</FormLabel>
                   <FormControl>
                     <ShapePalette 
                       onSelectShape={(shape) => field.onChange(shape.id)}
                       selectedShapeId={field.value}
-                      className="border rounded-md"
+                      className="border rounded-md bg-input"
                     />
                   </FormControl>
                   <FormMessage />
@@ -154,13 +154,13 @@ export function ImageGeneratorDialog({ isOpen, onOpenChange, onImageGenerated }:
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading || !btoaFn}>
+              <Button type="submit" disabled={isLoading || !activeChannelId}>
                 {isLoading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  <Wand2 className="mr-2 h-4 w-4" />
+                  <Sparkles className="mr-2 h-4 w-4" />
                 )}
-                Generate Image
+                Send to AI
               </Button>
             </DialogFooter>
           </form>
