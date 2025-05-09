@@ -9,7 +9,7 @@ import { Sidebar, SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Server as ServerIcon } from 'lucide-react';
+import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Server as ServerIconLucide, Share2, Copy, Globe, EyeOff } from 'lucide-react'; // Added Globe, EyeOff, Share2, Copy
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react';
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
@@ -36,6 +36,9 @@ import {
   getServersForUserFromFirestore, 
   setTypingIndicatorInFirestore,
   removeTypingIndicatorFromFirestore,
+  addUserToServerViaInvite, // Added
+  updateServerSettingsInFirestore, // Added
+  regenerateServerInviteCode, // Added
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -59,6 +62,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ChatView } from '@/components/chat/chat-view';
+import { useSearchParams, useRouter } from 'next/navigation'; // Added useSearchParams and useRouter
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; // Added Popover for server settings
 
 const USERS_COLLECTION = 'users';
 const TYPING_INDICATOR_TIMEOUT = 5000; 
@@ -103,6 +108,9 @@ export default function ShapeTalkPage() {
 
   const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
 
   const { toast } = useToast();
@@ -176,17 +184,15 @@ export default function ShapeTalkPage() {
   const loadUserServers = useCallback(async (userId: string) => {
     setIsLoadingServers(true);
     try {
-      const userServers = await getServersForUserFromFirestore(userId);
-      setServers(userServers);
-      // Removed logic that sets activeServerId here to prevent loops
-      // activeServerId will be managed by user interaction or initial load logic elsewhere
+      const userServersData = await getServersForUserFromFirestore(userId);
+      setServers(userServersData);
     } catch (error) {
       console.error("Failed to load user servers:", error);
       toast({ title: "Error Loading Servers", description: "Could not fetch your servers.", variant: "destructive" });
     } finally {
       setIsLoadingServers(false);
     }
-  }, [toast]); // Removed activeServerId dependency, only toast (stable) remains
+  }, [toast]); 
   
 
   useEffect(() => {
@@ -386,6 +392,23 @@ export default function ShapeTalkPage() {
       await loadUserBots(firebaseUser.uid); 
       await loadUserBotGroups(firebaseUser.uid); 
       setAuthError(null);
+
+      // Handle invite code after user is authenticated
+      const inviteCode = searchParams.get('inviteCode');
+      if (inviteCode) {
+        const joinResult = await addUserToServerViaInvite(firebaseUser.uid, inviteCode);
+        toast({
+          title: joinResult.success ? "Server Joined!" : "Join Failed",
+          description: joinResult.message,
+          variant: joinResult.success ? "default" : "destructive",
+        });
+        if (joinResult.success && joinResult.serverId) {
+          await loadUserServers(firebaseUser.uid); // Refresh server list
+          setActiveServerId(joinResult.serverId); // Optionally switch to the joined server
+        }
+        router.replace(window.location.pathname, undefined); // Remove inviteCode from URL
+      }
+
     } else { 
       setCurrentUser(null);
       setServers([]); 
@@ -402,14 +425,14 @@ export default function ShapeTalkPage() {
     setIsLoadingAuth(false); 
   }, [
       loadUserBots, loadUserBotGroups, loadUserServers, 
-      handleLogoutLogicForActiveChannel 
+      handleLogoutLogicForActiveChannel, searchParams, router, toast
   ]);
   
   useEffect(() => {
     setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, handleAuthStateChangeLogic);
     return () => unsubscribe();
-  }, [handleAuthStateChangeLogic]); // handleAuthStateChangeLogic is now stable due to its own dependencies being stable
+  }, [handleAuthStateChangeLogic]); 
 
   useEffect(() => {
     if (currentUser) {
@@ -418,7 +441,9 @@ export default function ShapeTalkPage() {
         if (serverChannels.length > 0 && !serverChannels.some(c => c.id === activeChannelId)) {
           setActiveChannelId(serverChannels[0].id); 
         } else if (serverChannels.length === 0) {
-          setActiveChannelId(null); 
+          // If no channels in server, potentially create a default or leave activeChannelId null
+          // For now, leave null if no channels
+           setActiveChannelId(null);
         }
       } else { 
         const allGlobalChannels = [...directMessages, ...channels.filter(c => !c.serverId)];
@@ -496,7 +521,7 @@ export default function ShapeTalkPage() {
       toast({ title: "Logged In Successfully!", description: `Welcome back, ${user.displayName || user.email}!` });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Login");
-      setIsLoadingAuth(false); // Ensure loading state is reset on error
+      setIsLoadingAuth(false); 
     }
   };
 
@@ -714,7 +739,7 @@ export default function ShapeTalkPage() {
             return;
         }
         
-        const respondingBotId = groupConfig.botIds[0];
+        const respondingBotId = groupConfig.botIds[0]; // Simple: first bot in group responds
         let botToRespond: BotConfig | PlatformShape | null = null;
         let botApiKeyToUse: string | undefined = undefined;
         let botShapeUsernameToUse: string | undefined = undefined;
@@ -853,6 +878,7 @@ export default function ShapeTalkPage() {
       setChannels(prev => [...prev, newChannel]);
       setActiveChannelId(newChannel.id);
       if(serverId && !activeServerId) setActiveServerId(serverId); 
+      // TODO: Save new channel to Firestore under the server's document
     }
   };
 
@@ -1063,9 +1089,9 @@ export default function ShapeTalkPage() {
   const handleServerCreated = (newServer: Server) => {
     setServers(prev => [...prev, newServer]);
     setActiveServerId(newServer.id); 
-    setActiveChannelId(null); 
+    setActiveChannelId(null); // No default channel yet
     setIsCreateServerDialogOpen(false);
-    toast({ title: "Server Created!", description: `Server "${newServer.name}" is ready.` });
+    toast({ title: "Server Created!", description: `Server "${newServer.name}" is ready. Invite code: ${newServer.inviteCode}` });
   };
 
   const handleUserTyping = useCallback(async (isTyping: boolean) => {
@@ -1144,11 +1170,54 @@ export default function ShapeTalkPage() {
   }, [activeChannelId, currentUser]);
 
 
+  const handleToggleServerCommunityStatus = async (server: Server) => {
+    if (!currentUser || currentUser.uid !== server.ownerUserId) {
+      toast({ title: "Permission Denied", description: "Only server owners can change this setting.", variant: "destructive"});
+      return;
+    }
+    const newIsCommunity = !server.isCommunity;
+    try {
+      await updateServerSettingsInFirestore(server.id, { isCommunity: newIsCommunity });
+      setServers(prevServers => prevServers.map(s => s.id === server.id ? {...s, isCommunity: newIsCommunity} : s));
+      toast({ title: "Server Updated", description: `Server is now ${newIsCommunity ? 'publicly discoverable' : 'private'}.`});
+    } catch (error) {
+      toast({ title: "Update Failed", description: (error as Error).message, variant: "destructive"});
+    }
+  };
+
+  const handleRegenerateInviteCode = async (serverId: string) => {
+     if (!currentUser || servers.find(s => s.id === serverId)?.ownerUserId !== currentUser.uid) {
+      toast({ title: "Permission Denied", description: "Only server owners can regenerate invite codes.", variant: "destructive"});
+      return;
+    }
+    try {
+      const newCode = await regenerateServerInviteCode(serverId);
+      if (newCode) {
+        setServers(prevServers => prevServers.map(s => s.id === serverId ? {...s, inviteCode: newCode} : s));
+        toast({ title: "Invite Code Regenerated", description: `New invite code: ${newCode}`});
+      } else {
+        throw new Error("Failed to get new code from server.");
+      }
+    } catch (error) {
+      toast({ title: "Update Failed", description: (error as Error).message, variant: "destructive"});
+    }
+  };
+
+  const handleCopyInviteLink = (inviteCode?: string) => {
+    if (!inviteCode) return;
+    const inviteLink = `${window.location.origin}/?inviteCode=${inviteCode}`;
+    navigator.clipboard.writeText(inviteLink)
+      .then(() => toast({ title: "Copied!", description: "Invite link copied to clipboard." }))
+      .catch(err => toast({ title: "Copy Failed", description: "Could not copy link.", variant: "destructive" }));
+  };
+
+
   const allAvailableChannels = activeServerId 
     ? channels.filter(c => c.serverId === activeServerId)
     : [...directMessages, ...channels.filter(c => !c.serverId)]; 
 
   const activeChannelDetails = currentUser && activeChannelId ? allAvailableChannels.find(c => c.id === activeChannelId) || null : null;
+  const activeServerDetails = activeServerId ? servers.find(s => s.id === activeServerId) : null;
 
 
   if (isLoadingAuth && !currentUser) { 
@@ -1229,7 +1298,10 @@ export default function ShapeTalkPage() {
                     currentUser={currentUser}
                     activeServerId={activeServerId}
                     activeChannelId={activeChannelId}
-                    serverName={activeServerId ? servers.find(s => s.id === activeServerId)?.name : "ShapeTalk"}
+                    serverName={activeServerDetails?.name || "ShapeTalk"}
+                    serverOwnerId={activeServerDetails?.ownerUserId}
+                    serverInviteCode={activeServerDetails?.inviteCode}
+                    isServerCommunity={activeServerDetails?.isCommunity}
                     onSelectChannel={handleSelectChannel}
                     onOpenAccountSettings={handleOpenAccountSettings}
                     onAddChannel={handleAddChannel}
@@ -1238,7 +1310,10 @@ export default function ShapeTalkPage() {
                     onOpenManageBotGroupDialog={handleOpenManageBotGroupDialog}
                     onLogout={handleLogout}
                     isLoadingUserBots={isLoadingUserBots || isLoadingBotGroups}
-                    isLoadingServers={isLoadingServers} 
+                    isLoadingServers={isLoadingServers}
+                    onToggleCommunityStatus={activeServerDetails ? () => handleToggleServerCommunityStatus(activeServerDetails) : undefined}
+                    onRegenerateInviteCode={activeServerDetails ? () => handleRegenerateInviteCode(activeServerDetails.id) : undefined}
+                    onCopyInviteLink={activeServerDetails?.inviteCode ? () => handleCopyInviteLink(activeServerDetails.inviteCode) : undefined}
                 />
             </Sidebar>
          ) : (

@@ -23,8 +23,11 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription as FormFieldDescription,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Server as ServerIcon, Loader2 } from 'lucide-react';
 import { createServerInFirestore } from '@/lib/firestoreService';
@@ -32,6 +35,7 @@ import { createServerInFirestore } from '@/lib/firestoreService';
 const formSchema = z.object({
   name: z.string().min(2, 'Server name must be at least 2 characters.').max(50, 'Server name must be 50 characters or less.'),
   avatarUrl: z.string().url("Must be a valid URL for server icon.").optional().or(z.literal('')),
+  isCommunity: z.boolean().default(false).optional(),
 });
 
 type CreateServerFormValues = z.infer<typeof formSchema>;
@@ -57,6 +61,7 @@ export function CreateServerDialog({
     defaultValues: {
       name: '',
       avatarUrl: '',
+      isCommunity: false,
     },
   });
 
@@ -71,7 +76,8 @@ export function CreateServerDialog({
         name: data.name,
         ownerUserId: currentUserId,
         avatarUrl: data.avatarUrl || undefined,
-        dataAiHint: 'server icon group', // Default hint for placeholder images
+        dataAiHint: 'server icon group community', 
+        isCommunity: data.isCommunity || false,
       });
       
       onServerCreated(newServer);
@@ -101,7 +107,7 @@ export function CreateServerDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><ServerIcon className="text-primary" /> Create a New Server</DialogTitle>
           <DialogDescription>
-            Give your new server a name and an optional icon.
+            Give your new server a name, an optional icon, and set its visibility.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -132,6 +138,30 @@ export function CreateServerDialog({
                 </FormItem>
               )}
             />
+             <FormField
+              control={form.control}
+              name="isCommunity"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 shadow">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      id="isCommunityServer"
+                    />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <Label htmlFor="isCommunityServer" className="font-medium">
+                      Community Server
+                    </Label>
+                    <FormFieldDescription className="text-xs">
+                      If checked, this server will be publicly discoverable.
+                    </FormFieldDescription>
+                  </div>
+                   <FormMessage />
+                </FormItem>
+              )}
+            />
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="outline" disabled={isLoading}>
@@ -153,3 +183,4 @@ export function CreateServerDialog({
     </Dialog>
   );
 }
+

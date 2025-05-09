@@ -95,6 +95,8 @@ export interface Server {
   dataAiHint?: string; // for placeholder images
   channelIds?: string[]; // IDs of channels belonging to this server
   memberUserIds?: string[]; // IDs of users who are members (including owner)
+  isCommunity?: boolean; // True if server is discoverable
+  inviteCode?: string; // Unique code to join the server
 }
 
 // New Typing Indicator type
@@ -104,3 +106,4 @@ export interface TypingIndicator {
   channelId: string;
   timestamp: number; // To clear old indicators
 }
+

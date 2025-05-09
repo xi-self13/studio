@@ -16,23 +16,41 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
-  serverTimestamp // For typing indicators potentially
+  serverTimestamp,
+  writeBatch,
+  Timestamp
 } from 'firebase/firestore'; 
 import type { BotConfig, PlatformShape, BotGroup, Server, TypingIndicator, User } from '@/types'; 
 
 const USER_BOTS_COLLECTION = 'userBots'; 
 const PLATFORM_SHAPES_COLLECTION = 'platformShapes'; 
 const BOT_GROUPS_COLLECTION = 'botGroups';
-const SERVERS_COLLECTION = 'servers'; // New collection for Servers
-const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; // New collection for Typing Indicators
+const SERVERS_COLLECTION = 'servers'; 
+const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; 
 const USERS_COLLECTION = 'users';
+
+// Helper to generate random string for invite codes
+function generateRandomString(length: number): string {
+  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
+}
 
 
 // --- User Profile Functions ---
 export async function updateUserProfileInFirestore(userId: string, profileData: Partial<Pick<User, 'name' | 'avatarUrl' | 'statusMessage'>>): Promise<void> {
   try {
     const userDocRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userDocRef, profileData);
+    // Ensure that undefined values are converted to null for Firestore or handled appropriately
+    const dataToUpdate: any = {};
+    if (profileData.name !== undefined) dataToUpdate.name = profileData.name;
+    if (profileData.avatarUrl !== undefined) dataToUpdate.avatarUrl = profileData.avatarUrl === '' ? null : profileData.avatarUrl;
+    if (profileData.statusMessage !== undefined) dataToUpdate.statusMessage = profileData.statusMessage === '' ? null : profileData.statusMessage;
+    
+    await updateDoc(userDocRef, dataToUpdate);
     console.log(`User profile for ${userId} updated.`);
   } catch (error) {
     console.error('Error updating user profile in Firestore:', error);
@@ -386,8 +404,8 @@ export async function removeBotFromGroupInFirestore(groupId: string, botId: stri
     });
     console.log(`Bot ${botId} removed from group ${groupId}.`);
   } catch (error) {
-    console.error(`Error removing bot ${botId} from group ${groupId}:`, error); // Corrected log message
-    throw new Error('Failed to remove bot from group.'); // Corrected error message
+    console.error(`Error removing bot ${botId} from group ${groupId}:`, error); 
+    throw new Error('Failed to remove bot from group.'); 
   }
 }
 
@@ -395,17 +413,23 @@ export async function removeBotFromGroupInFirestore(groupId: string, botId: stri
 // --- Server Functions ---
 const serversCollectionRef = collection(db, SERVERS_COLLECTION);
 
-export async function createServerInFirestore(serverData: Omit<Server, 'id' | 'channelIds' | 'memberUserIds'> & { ownerUserId: string }): Promise<Server> {
+export async function createServerInFirestore(
+  serverData: Omit<Server, 'id' | 'channelIds' | 'memberUserIds' | 'inviteCode'> & { ownerUserId: string; isCommunity?: boolean }
+): Promise<Server> {
   try {
-    const newServerData = {
-      ...serverData,
-      channelIds: [], // Initialize with no channels
-      memberUserIds: [serverData.ownerUserId], // Owner is the first member
-      avatarUrl: serverData.avatarUrl || `https://picsum.photos/seed/${Date.now()}/100/100`, // Default avatar
-      dataAiHint: serverData.dataAiHint || 'server icon',
+    const inviteCode = generateRandomString(8);
+    const newServerData: Omit<Server, 'id'> = {
+      name: serverData.name,
+      ownerUserId: serverData.ownerUserId,
+      avatarUrl: serverData.avatarUrl || `https://picsum.photos/seed/${Date.now()}/100/100`,
+      dataAiHint: serverData.dataAiHint || 'server icon community',
+      channelIds: [],
+      memberUserIds: [serverData.ownerUserId],
+      isCommunity: serverData.isCommunity || false,
+      inviteCode: inviteCode,
     };
     const docRef = await addDoc(serversCollectionRef, newServerData);
-    console.log(`Server "${serverData.name}" created with ID: ${docRef.id} by user ${serverData.ownerUserId}.`);
+    console.log(`Server "${newServerData.name}" created with ID: ${docRef.id}, Invite Code: ${inviteCode}`);
     return { ...newServerData, id: docRef.id };
   } catch (error) {
     console.error('Error creating server in Firestore:', error);
@@ -415,7 +439,6 @@ export async function createServerInFirestore(serverData: Omit<Server, 'id' | 'c
 
 export async function getServersForUserFromFirestore(userId: string): Promise<Server[]> {
   try {
-    // Get servers where the user is an owner OR a member
     const q = query(serversCollectionRef, where('memberUserIds', 'array-contains', userId));
     const querySnapshot = await getDocs(q);
     
@@ -430,6 +453,8 @@ export async function getServersForUserFromFirestore(userId: string): Promise<Se
         dataAiHint: data.dataAiHint,
         channelIds: data.channelIds || [],
         memberUserIds: data.memberUserIds || [],
+        isCommunity: data.isCommunity || false,
+        inviteCode: data.inviteCode,
       } as Server);
     });
     return servers;
@@ -439,20 +464,117 @@ export async function getServersForUserFromFirestore(userId: string): Promise<Se
   }
 }
 
-// --- Typing Indicator Functions (Basic Structure) ---
-// These functions form the basis. Real-time listeners would be set up on the client.
+export async function getCommunityServersFromFirestore(): Promise<Server[]> {
+  try {
+    const q = query(serversCollectionRef, where('isCommunity', '==', true));
+    const querySnapshot = await getDocs(q);
+    const servers: Server[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      servers.push({
+        id: docSnap.id,
+        name: data.name,
+        ownerUserId: data.ownerUserId,
+        avatarUrl: data.avatarUrl,
+        dataAiHint: data.dataAiHint,
+        // channelIds and memberUserIds might not be needed for discovery list, but included for completeness
+        channelIds: data.channelIds || [], 
+        memberUserIds: data.memberUserIds || [],
+        isCommunity: true,
+        inviteCode: data.inviteCode, // Good to have if a "join via code" is an option from discovery
+      } as Server);
+    });
+    return servers;
+  } catch (error) {
+    console.error('Error retrieving community servers from Firestore:', error);
+    return [];
+  }
+}
+
+export async function getServerByInviteCode(inviteCode: string): Promise<Server | null> {
+  try {
+    const q = query(serversCollectionRef, where('inviteCode', '==', inviteCode));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const docSnap = querySnapshot.docs[0];
+      const data = docSnap.data();
+      return {
+        id: docSnap.id,
+        name: data.name,
+        ownerUserId: data.ownerUserId,
+        avatarUrl: data.avatarUrl,
+        dataAiHint: data.dataAiHint,
+        channelIds: data.channelIds || [],
+        memberUserIds: data.memberUserIds || [],
+        isCommunity: data.isCommunity || false,
+        inviteCode: data.inviteCode,
+      } as Server;
+    }
+    return null;
+  } catch (error) {
+    console.error(`Error retrieving server by invite code ${inviteCode}:`, error);
+    return null;
+  }
+}
+
+export async function addUserToServerViaInvite(userId: string, inviteCode: string): Promise<{ success: boolean; serverId?: string; message: string }> {
+  try {
+    const server = await getServerByInviteCode(inviteCode);
+    if (!server) {
+      return { success: false, message: "Invalid invite code." };
+    }
+    if (server.memberUserIds?.includes(userId)) {
+      return { success: true, serverId: server.id, message: "You are already a member of this server." };
+    }
+    const serverDocRef = doc(db, SERVERS_COLLECTION, server.id);
+    await updateDoc(serverDocRef, {
+      memberUserIds: arrayUnion(userId)
+    });
+    return { success: true, serverId: server.id, message: `Successfully joined server: ${server.name}` };
+  } catch (error) {
+    console.error(`Error adding user ${userId} to server via invite ${inviteCode}:`, error);
+    return { success: false, message: "Failed to join server using invite code." };
+  }
+}
+
+export async function updateServerSettingsInFirestore(serverId: string, settings: Partial<Pick<Server, 'name' | 'avatarUrl' | 'isCommunity' | 'dataAiHint'>>): Promise<void> {
+  try {
+    const serverDocRef = doc(db, SERVERS_COLLECTION, serverId);
+    await updateDoc(serverDocRef, settings);
+    console.log(`Server settings for ${serverId} updated.`);
+  } catch (error) {
+    console.error('Error updating server settings in Firestore:', error);
+    throw new Error('Failed to update server settings.');
+  }
+}
+
+export async function regenerateServerInviteCode(serverId: string): Promise<string | null> {
+  try {
+    const newInviteCode = generateRandomString(8);
+    const serverDocRef = doc(db, SERVERS_COLLECTION, serverId);
+    await updateDoc(serverDocRef, {
+      inviteCode: newInviteCode
+    });
+    console.log(`Regenerated invite code for server ${serverId}: ${newInviteCode}`);
+    return newInviteCode;
+  } catch (error) {
+    console.error('Error regenerating server invite code:', error);
+    return null;
+  }
+}
+
+
+// --- Typing Indicator Functions ---
 
 export async function setTypingIndicatorInFirestore(typingIndicator: TypingIndicator): Promise<void> {
   try {
-    // Using channelId_userId as document ID for easy lookup/overwrite
     const indicatorDocRef = doc(db, TYPING_INDICATORS_COLLECTION, `${typingIndicator.channelId}_${typingIndicator.userId}`);
     await setDoc(indicatorDocRef, {
       ...typingIndicator,
-      timestamp: serverTimestamp() // Use server timestamp for reliable TTL later if needed
+      timestamp: serverTimestamp() 
     });
   } catch (error) {
     console.error('Error setting typing indicator:', error);
-    // Don't throw, as this is a non-critical feature for basic chat
   }
 }
 
@@ -464,3 +586,20 @@ export async function removeTypingIndicatorFromFirestore(channelId: string, user
     console.error('Error removing typing indicator:', error);
   }
 }
+
+// Function to clean up old typing indicators (could be run periodically or via a cloud function)
+export async function cleanupOldTypingIndicators(timeoutMillis: number = 5000): Promise<void> {
+  try {
+    const cutoff = Timestamp.fromMillis(Date.now() - timeoutMillis);
+    const q = query(collection(db, TYPING_INDICATORS_COLLECTION), where('timestamp', '<', cutoff));
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    console.log(`Cleaned up ${snapshot.size} old typing indicators.`);
+  } catch (error) {
+    console.error('Error cleaning up old typing indicators:', error);
+  }
+}
+
+

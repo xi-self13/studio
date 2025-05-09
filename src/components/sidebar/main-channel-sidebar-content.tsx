@@ -18,9 +18,13 @@ import {
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Settings, Bot, PlusCircle, Cpu, LogOut, UserCog, Users2 as BotGroupsIcon, Hash, Users as UsersIcon } from 'lucide-react';
+import { Settings, Bot, PlusCircle, Cpu, LogOut, UserCog, Users2 as BotGroupsIcon, Hash, Users as UsersIcon, ChevronDown, Globe, EyeOff, Copy, RefreshCw, Share2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 interface MainChannelSidebarContentProps {
   channels: Channel[];
@@ -30,6 +34,9 @@ interface MainChannelSidebarContentProps {
   activeServerId: string | null;
   activeChannelId: string | null;
   serverName?: string; 
+  serverOwnerId?: string;
+  serverInviteCode?: string;
+  isServerCommunity?: boolean;
   onSelectChannel: (channelId: string) => void;
   onOpenAccountSettings: () => void;
   onAddChannel: (serverId: string) => void;
@@ -38,7 +45,10 @@ interface MainChannelSidebarContentProps {
   onOpenManageBotGroupDialog: (groupId: string) => void;
   onLogout: () => void;
   isLoadingUserBots?: boolean;
-  isLoadingServers?: boolean; 
+  isLoadingServers?: boolean;
+  onToggleCommunityStatus?: () => void;
+  onRegenerateInviteCode?: () => void;
+  onCopyInviteLink?: () => void;
 }
 
 export function MainChannelSidebarContent({
@@ -49,6 +59,9 @@ export function MainChannelSidebarContent({
   activeServerId,
   activeChannelId,
   serverName = "ShapeTalk",
+  serverOwnerId,
+  serverInviteCode,
+  isServerCommunity,
   onSelectChannel,
   onOpenAccountSettings,
   onAddChannel,
@@ -58,6 +71,9 @@ export function MainChannelSidebarContent({
   onLogout,
   isLoadingUserBots = false,
   isLoadingServers = false, 
+  onToggleCommunityStatus,
+  onRegenerateInviteCode,
+  onCopyInviteLink,
 }: MainChannelSidebarContentProps) {
 
   const usersMap = React.useMemo(() => {
@@ -77,15 +93,54 @@ export function MainChannelSidebarContent({
     return tempUsers;
   }, [currentUser, directMessages]);
 
+  const isServerOwner = activeServerId && serverOwnerId === currentUser.uid;
 
   return (
     <>
       <SidebarHeader className="p-4 items-center">
-        <div className="flex items-center gap-2">
-          <ShapeTalkLogo className="w-8 h-8 text-primary group-data-[collapsible=icon]:hidden" />
-          <h1 className="text-xl font-semibold text-sidebar-foreground group-data-[collapsible=icon]:hidden truncate">
-            {serverName}
-          </h1>
+        <div className="flex items-center justify-between w-full">
+          <div className="flex items-center gap-2 overflow-hidden">
+            <ShapeTalkLogo className="w-8 h-8 text-primary group-data-[collapsible=icon]:hidden" />
+            <h1 className="text-xl font-semibold text-sidebar-foreground group-data-[collapsible=icon]:hidden truncate">
+              {serverName}
+            </h1>
+          </div>
+          {isServerOwner && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8 group-data-[collapsible=icon]:hidden">
+                  <ChevronDown size={18} />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-2 bg-popover border-border text-popover-foreground">
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium px-2 text-muted-foreground">Server Settings</Label>
+                  {serverInviteCode && (
+                    <div className="space-y-1 px-2">
+                       <Label htmlFor="invite-code" className="text-xs">Invite Code</Label>
+                       <div className="flex items-center gap-1">
+                          <Input id="invite-code" readOnly value={serverInviteCode} className="h-8 text-xs flex-1 bg-input" />
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onCopyInviteLink} aria-label="Copy Invite Link"><Copy size={14}/></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onRegenerateInviteCode} aria-label="Regenerate Invite Code"><RefreshCw size={14}/></Button>
+                       </div>
+                    </div>
+                  )}
+                  {onToggleCommunityStatus && (
+                    <div className="flex items-center justify-between px-2 py-1.5 hover:bg-accent rounded-md cursor-pointer" onClick={onToggleCommunityStatus}>
+                      <div className="flex items-center gap-2">
+                        {isServerCommunity ? <Globe size={16}/> : <EyeOff size={16}/>}
+                        <span className="text-sm">{isServerCommunity ? 'Public Server' : 'Private Server'}</span>
+                      </div>
+                      <Switch checked={isServerCommunity} id="server-community-switch" aria-label="Toggle server community status"/>
+                    </div>
+                  )}
+                   <Button variant="ghost" className="w-full justify-start text-sm px-2 py-1.5 hover:bg-accent" onClick={onCopyInviteLink}>
+                     <Share2 size={16} className="mr-2"/> Share Invite Link
+                   </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
         </div>
       </SidebarHeader>
 
@@ -95,9 +150,11 @@ export function MainChannelSidebarContent({
             <SidebarGroup>
               <SidebarGroupLabel className="flex items-center justify-between">
                 <span className="flex items-center gap-2"><Hash size={16} /> Channels</span>
-                <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => onAddChannel(activeServerId)} aria-label="Add Channel">
-                  <PlusCircle size={16} />
-                </Button>
+                {isServerOwner && (
+                  <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => onAddChannel(activeServerId)} aria-label="Add Channel">
+                    <PlusCircle size={16} />
+                  </Button>
+                )}
               </SidebarGroupLabel>
               <SidebarMenu>
                 {isLoadingServers && [1,2].map(i => <SidebarMenuItem key={`skel-chan-${i}`}><SidebarMenuSkeleton showIcon /></SidebarMenuItem>)}
