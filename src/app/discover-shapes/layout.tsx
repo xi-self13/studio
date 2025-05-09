@@ -12,8 +12,11 @@ import { AppSidebar } from '@/components/sidebar/sidebar-content'; // if we want
 import { useState, useEffect } from 'react';
 import { auth } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth'; // Added import
 import type { User, Channel } from '@/types'; // Adjust imports as needed
 import { useRouter } from 'next/navigation'; // For redirecting if not logged in
+import Link from 'next/link';
+
 
 // Dummy props for AppSidebar if it were to be used here directly
 // In a real scenario, these would come from a shared context or be fetched.
@@ -98,3 +101,4 @@ export default function DiscoverShapesLayout({
     </SidebarProvider>
   );
 }
+
