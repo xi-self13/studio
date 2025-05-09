@@ -1,8 +1,7 @@
-
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import type { Channel, Message, User, BotConfig, PlatformShape, BotGroup, Server } from '@/types'; // Added Server
+import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
+import type { Channel, Message, User, BotConfig, PlatformShape, BotGroup, Server, TypingIndicator } from '@/types'; // Added Server and TypingIndicator
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
 import { SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/components/ui/sidebar';
@@ -23,7 +22,7 @@ import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth, db } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { Separator } from '@/components/ui/separator';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp } from 'firebase/firestore'; // Added collection, onSnapshot, query, where, writeBatch, Timestamp
 import { 
   getUserBotConfigsFromFirestore, 
   getPlatformShapesFromFirestore, 
@@ -31,9 +30,11 @@ import {
   saveUserBotConfigToFirestore,
   getBotConfigFromFirestore,
   deleteUserBotConfigFromFirestore,
-  updateUserProfileInFirestore, // Added for status message
-  createServerInFirestore, // New
-  getServersForUserFromFirestore, // New
+  updateUserProfileInFirestore, 
+  createServerInFirestore, 
+  getServersForUserFromFirestore, 
+  setTypingIndicatorInFirestore, // New
+  removeTypingIndicatorFromFirestore, // New
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -57,14 +58,16 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
+const USERS_COLLECTION = 'users'; // Define USERS_COLLECTION
+const TYPING_INDICATOR_TIMEOUT = 5000; // 5 seconds for typing indicator to disappear
 
-const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // This will likely become server-specific or a global DM
+const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT';
-const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global'; // This might also become a specific channel in a "Community" server
+const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global'; 
 
 export default function ShapeTalkPage() {
-  const [servers, setServers] = useState<Server[]>([]); // New state for servers
-  const [activeServerId, setActiveServerId] = useState<string | null>(null); // New state for active server
+  const [servers, setServers] = useState<Server[]>([]); 
+  const [activeServerId, setActiveServerId] = useState<string | null>(null); 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [directMessages, setDirectMessages] = useState<Channel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -79,11 +82,11 @@ export default function ShapeTalkPage() {
   const [isBotSettingsDialogOpen, setIsBotSettingsDialogOpen] = useState(false);
   const [selectedBotToEdit, setSelectedBotToEdit] = useState<BotConfig | null>(null);
   const [isAccountSettingsDialogOpen, setIsAccountSettingsDialogOpen] = useState(false);
-  const [isCreateServerDialogOpen, setIsCreateServerDialogOpen] = useState(false); // New state
+  const [isCreateServerDialogOpen, setIsCreateServerDialogOpen] = useState(false); 
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingUserBots, setIsLoadingUserBots] = useState(false);
   const [isLoadingPlatformAis, setIsLoadingPlatformAis] = useState(false);
-  const [isLoadingServers, setIsLoadingServers] = useState(false); // New loading state
+  const [isLoadingServers, setIsLoadingServers] = useState(false); 
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -95,6 +98,10 @@ export default function ShapeTalkPage() {
   const [selectedGroupToManage, setSelectedGroupToManage] = useState<BotGroup | null>(null);
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
+
+  const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]); // New state for typing indicators
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
 
   const { toast } = useToast();
 
@@ -163,16 +170,16 @@ export default function ShapeTalkPage() {
     }
   }, [toast]);
 
-  // Load servers for the current user
+
   const loadUserServers = useCallback(async (userId: string) => {
     setIsLoadingServers(true);
     try {
       const userServers = await getServersForUserFromFirestore(userId);
       setServers(userServers);
       if (userServers.length > 0 && !activeServerId) {
-        // setActiveServerId(userServers[0].id); // Optionally activate the first server
+        // setActiveServerId(userServers[0].id); 
       } else if (userServers.length === 0) {
-        setActiveServerId(null); // No servers, ensure no server is active
+        setActiveServerId(null); 
       }
     } catch (error) {
       console.error("Failed to load user servers:", error);
@@ -199,16 +206,22 @@ export default function ShapeTalkPage() {
       return prevUsers;
     });
 
-    // Initial "global" channels, these might be deprecated or moved into a default server later
     const staticChannelsData: Channel[] = [
-      // { id: 'general', name: 'general', type: 'channel', icon: Hash }, // This might become server-specific
-      { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID }, // Global DM with default bot
-      { id: AI_LOUNGE_CHANNEL_ID, name: 'AI Lounge', type: 'channel', icon: Cpu, isAiLounge: true }, // Global AI lounge
+      { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'dm', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID, members: ['placeholderCurrentUser', DEFAULT_AI_BOT_USER_ID] }, 
+      { id: AI_LOUNGE_CHANNEL_ID, name: 'AI Lounge', type: 'channel', icon: Cpu, isAiLounge: true }, 
     ];
     
     setChannels(prevChannels => {
       const existingChannelIds = new Set(prevChannels.map(c => c.id));
-      const newStaticChannels = staticChannelsData.filter(sc => !existingChannelIds.has(sc.id));
+      const newStaticChannels = staticChannelsData.filter(sc => !existingChannelIds.has(sc.id) && sc.type === 'channel'); // Only add global channels here
+      const newStaticDms = staticChannelsData.filter(sc => !existingChannelIds.has(sc.id) && sc.type === 'dm');
+      
+      setDirectMessages(prevDms => {
+        const existingDmIds = new Set(prevDms.map(dm => dm.id));
+        const newDmsToAdd = newStaticDms.filter(ndm => !existingDmIds.has(ndm.id));
+        return [...prevDms, ...newDmsToAdd];
+      });
+
       if (newStaticChannels.length > 0) {
         return [...prevChannels, ...newStaticChannels];
       }
@@ -248,7 +261,7 @@ export default function ShapeTalkPage() {
       const botDMs: Channel[] = fetchedBotConfigs.map(bc => ({
         id: `dm_${bc.id}_${userId}`,
         name: bc.name,
-        type: 'dm', // DMs are not tied to a server
+        type: 'dm', 
         members: [userId, bc.id],
         isBotChannel: true,
         botId: bc.id,
@@ -261,11 +274,11 @@ export default function ShapeTalkPage() {
         const humanUsers = prevUsers.filter(u => !u.isBot);
         return [...humanUsers, ...currentNonHumanUsers, ...newBotUsersToAdd];
       });
-      // DMs are global, not server-specific in this model
+      
       setDirectMessages(prevDms => {
          const existingUserDmIds = new Set(prevDms.filter(dm => botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId))).map(dm => dm.id));
          const newBotDmsToAdd = botDMs.filter(ndm => !existingUserDmIds.has(ndm.id));
-         const otherDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId)));
+         const otherDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId) || dm.botId === DEFAULT_AI_BOT_USER_ID)); // Keep default bot DM
         return [...otherDms, ...newBotDmsToAdd];
       });
 
@@ -283,7 +296,6 @@ export default function ShapeTalkPage() {
       const groups = await getOwnedBotGroupsFromFirestore(userId);
       setBotGroups(groups);
 
-      // Bot group channels are also global for now, not server-specific
       const groupChannels: Channel[] = groups.map(group => ({
         id: `group_${group.id}`,
         name: group.name,
@@ -294,12 +306,12 @@ export default function ShapeTalkPage() {
         members: [userId, ...(group.botIds || [])], 
       }));
       
+      // Bot group channels are also global for now.
       setChannels(prev => {
         const existingGroupChannelIds = new Set(prev.filter(c => c.isBotGroup).map(c => c.id));
         const newGroupChannels = groupChannels.filter(gc => !existingGroupChannelIds.has(gc.id));
         
         const nonGroupChannelsCurrent = prev.filter(c => !c.isBotGroup);
-        // Make sure to only add new group channels to avoid duplication if this is called multiple times
         return [...nonGroupChannelsCurrent, ...newGroupChannels];
       });
 
@@ -312,12 +324,14 @@ export default function ShapeTalkPage() {
   }, [toast]);
 
   const handleLogoutLogicForActiveChannel = useCallback(() => {
-    setActiveServerId(null); // Clear active server on logout
-    // setActiveChannelId('general'); // This might need to be re-evaluated with servers
-    const defaultGlobalDM = directMessages.find(dm => dm.id === DEFAULT_BOT_CHANNEL_ID);
+    setActiveServerId(null); 
+    const defaultGlobalDM = directMessages.find(dm => dm.id === DEFAULT_BOT_CHANNEL_ID && dm.botId === DEFAULT_AI_BOT_USER_ID);
     if (defaultGlobalDM) {
       setActiveChannelId(defaultGlobalDM.id);
-    } else {
+    } else if (directMessages.length > 0) {
+      setActiveChannelId(directMessages[0].id);
+    }
+     else {
       setActiveChannelId(null);
     }
   }, [directMessages]);
@@ -350,7 +364,7 @@ export default function ShapeTalkPage() {
           isBot: false,
           statusMessage: undefined,
         };
-        await setDoc(userDocRef, { // Ensure all User fields are considered here
+        await setDoc(userDocRef, { 
           uid: appUser.uid,
           email: appUser.email,
           name: appUser.name,
@@ -364,21 +378,29 @@ export default function ShapeTalkPage() {
         return [appUser, ...otherUsers];
       });
 
-      await loadUserServers(firebaseUser.uid); // Load servers first
+      // Ensure default bot DM includes the current user as a member
+      setDirectMessages(prevDMs => prevDMs.map(dm => {
+        if (dm.botId === DEFAULT_AI_BOT_USER_ID) {
+          return {...dm, members: [appUser.uid, DEFAULT_AI_BOT_USER_ID]};
+        }
+        return dm;
+      }));
+
+      await loadUserServers(firebaseUser.uid); 
       await loadUserBots(firebaseUser.uid); 
       await loadUserBotGroups(firebaseUser.uid); 
       setAuthError(null);
     } else { 
       setCurrentUser(null);
-      setServers([]); // Clear servers
-      setActiveServerId(null); // Clear active server
+      setServers([]); 
+      setActiveServerId(null); 
       setUsers(prevUsers => prevUsers.filter(u => u.isBot)); 
       setUserBots([]);
-      setDirectMessages([]); // DMs are global
-      setBotGroups([]); // Bot groups are global
+      // Clear user-specific DMs, keep only default bot DM (if any)
+      setDirectMessages(prevDms => prevDms.filter(dm => dm.botId === DEFAULT_AI_BOT_USER_ID).map(dm => ({...dm, members: ['placeholderCurrentUser', DEFAULT_AI_BOT_USER_ID]})));
+      setBotGroups([]); 
       
-      // Global channels (like AI lounge, default bot DM) remain
-      const globalChannelIds = new Set([DEFAULT_BOT_CHANNEL_ID, AI_LOUNGE_CHANNEL_ID]);
+      const globalChannelIds = new Set([AI_LOUNGE_CHANNEL_ID]);
       setChannels(prevCh => prevCh.filter(c => globalChannelIds.has(c.id) && !c.isBotGroup && !c.serverId));
       handleLogoutLogicForActiveChannel();
     }
@@ -397,27 +419,32 @@ export default function ShapeTalkPage() {
   // Effect to set a default active channel when server or global context changes
   useEffect(() => {
     if (currentUser) {
-      if (activeServerId) { // A server is active
+      if (activeServerId) { 
         const serverChannels = channels.filter(c => c.serverId === activeServerId && !c.isBotChannel && !c.isBotGroup);
         if (serverChannels.length > 0 && !serverChannels.some(c => c.id === activeChannelId)) {
-          setActiveChannelId(serverChannels[0].id); // Activate first channel of the server
+          setActiveChannelId(serverChannels[0].id); 
         } else if (serverChannels.length === 0) {
-          setActiveChannelId(null); // No channels in this server
+          setActiveChannelId(null); 
         }
-      } else { // No server active (Global DM/Group view)
+      } else { 
         const allGlobalChannels = [...directMessages, ...channels.filter(c => !c.serverId)];
-        if (allGlobalChannels.length > 0 && !allGlobalChannels.some(c => c.id === activeChannelId)) {
-           const defaultDm = allGlobalChannels.find(c => c.id === DEFAULT_BOT_CHANNEL_ID);
-           const firstDm = allGlobalChannels.find(c => c.type === 'dm');
-           const firstGroup = allGlobalChannels.find(c => c.isBotGroup);
+        
+        const currentActiveIsGlobal = allGlobalChannels.some(c => c.id === activeChannelId);
+
+        if (allGlobalChannels.length > 0 && !currentActiveIsGlobal) {
+           const defaultDm = allGlobalChannels.find(c => c.botId === DEFAULT_AI_BOT_USER_ID && c.members?.includes(currentUser.uid));
+           const firstUserDm = allGlobalChannels.find(c => c.type === 'dm' && c.botId !== DEFAULT_AI_BOT_USER_ID && c.members?.includes(currentUser.uid));
+           const firstGroup = allGlobalChannels.find(c => c.isBotGroup && c.members?.includes(currentUser.uid));
            const aiLounge = allGlobalChannels.find(c => c.id === AI_LOUNGE_CHANNEL_ID);
 
            if (defaultDm) setActiveChannelId(defaultDm.id);
-           else if (firstDm) setActiveChannelId(firstDm.id);
+           else if (firstUserDm) setActiveChannelId(firstUserDm.id);
            else if (firstGroup) setActiveChannelId(firstGroup.id);
            else if (aiLounge) setActiveChannelId(aiLounge.id);
            else if (allGlobalChannels[0]) setActiveChannelId(allGlobalChannels[0].id);
            else setActiveChannelId(null);
+        } else if (allGlobalChannels.length === 0) {
+          setActiveChannelId(null);
         }
       }
     }
@@ -467,10 +494,9 @@ export default function ShapeTalkPage() {
           statusMessage: null,
         });
       } else {
-         await updateDoc(userDocRef, { // Only update if new data is better
+         await updateDoc(userDocRef, { 
             name: user.displayName || userSnap.data()?.name,
             avatarUrl: user.photoURL || userSnap.data()?.avatarUrl,
-            // statusMessage is not updated by Google Sign-In automatically
         });
       }
       toast({ title: "Logged In Successfully!", description: `Welcome back, ${user.displayName || user.email}!` });
@@ -554,8 +580,9 @@ export default function ShapeTalkPage() {
   }, [currentUser, activeChannelId, channels, directMessages, userBots, isApiHealthy, messages, sendBotMessageUtil, hasSentInitialBotMessageForChannel]);
 
   const handleSelectServer = (serverId: string) => {
+    if (serverId === activeServerId) return; // Avoid re-selecting the same server
     setActiveServerId(serverId);
-    setActiveChannelId(null); // Reset active channel when server changes, useEffect will pick a default for the server
+    setActiveChannelId(null); 
   };
 
   const handleSelectChannel = (channelId: string) => {
@@ -577,7 +604,12 @@ export default function ShapeTalkPage() {
     };
     setMessages(prev => [...prev, newMessage]);
 
-    const allChannels = [...channels, ...directMessages]; // Combine server channels and DMs
+    // Remove user's own typing indicator immediately after sending a message
+    await removeTypingIndicatorFromFirestore(channelId, currentUser.uid);
+    setTypingUsers(prev => prev.filter(tu => !(tu.channelId === channelId && tu.userId === currentUser.uid)));
+
+
+    const allChannels = [...channels, ...directMessages]; 
     const currentChannel = allChannels.find(c => c.id === channelId);
 
     if (currentChannel && currentChannel.isBotChannel && content.type === 'text') {
@@ -789,7 +821,9 @@ export default function ShapeTalkPage() {
       setDirectMessages(prev => prev.filter(dm => dm.botId !== botId || dm.id !== `dm_${botId}_${currentUser.uid}`));
       setUsers(prev => prev.filter(u => u.uid !== botId));
       if (activeChannelId === `dm_${botId}_${currentUser.uid}`) {
-        setActiveChannelId(channels.find(c => c.id === 'general')?.id || null); // Revisit default channel logic
+        const globalDefaultDM = directMessages.find(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
+        setActiveChannelId(globalDefaultDM?.id || channels.find(c => c.id === AI_LOUNGE_CHANNEL_ID)?.id || null); 
+        setActiveServerId(null); 
       }
       toast({ title: "Bot Deleted", description: `${botToDelete.name} has been deleted.` });
       loadPlatformAndPublicAis(); 
@@ -799,17 +833,17 @@ export default function ShapeTalkPage() {
     }
   };
 
-  const handleAccountUpdate = async (updatedUser: User) => { // Already updated in dialog to use updateUserProfileInFirestore
+  const handleAccountUpdate = async (updatedUser: User) => { 
     if (!currentUser) return;
-    // The onAccountUpdate prop in AccountSettingsDialog now handles Firestore and Auth updates.
-    // This function primarily updates local state.
     setCurrentUser(prev => prev ? {...prev, ...updatedUser} : null);
     setUsers(prevUsers => prevUsers.map(u => u.uid === updatedUser.uid ? {...u, ...updatedUser} : u));
-    // Toast is handled in the dialog
   };
 
-  // Modified to take serverId to potentially create channels within a server context
   const handleAddChannel = (serverId: string | null = activeServerId) => {
+    if (!serverId) {
+        toast({title: "No Server Selected", description: "Please select a server to add a channel.", variant: "destructive"});
+        return;
+    }
     const newChannelName = prompt("Enter new channel name:");
     if (newChannelName && currentUser) {
       const newChannel: Channel = {
@@ -817,12 +851,12 @@ export default function ShapeTalkPage() {
         name: newChannelName,
         type: 'channel',
         icon: Hash,
-        members: [currentUser.uid], // Simplified members for now
-        serverId: serverId || undefined, // Associate with active server if one exists
+        members: [currentUser.uid], 
+        serverId: serverId, 
       };
       setChannels(prev => [...prev, newChannel]);
       setActiveChannelId(newChannel.id);
-      if(serverId && !activeServerId) setActiveServerId(serverId); // Activate server if creating channel for a non-active one
+      if(serverId && !activeServerId) setActiveServerId(serverId); 
     }
   };
 
@@ -877,7 +911,7 @@ export default function ShapeTalkPage() {
       });
       if (wasJustCreated) {
          setActiveChannelId(dmId);
-         setActiveServerId(null); // Switch to DM view
+         setActiveServerId(null); 
       }
     }
     if (botConfig.isPublic || userBots.find(b => b.id === botConfig.id)?.isPublic !== botConfig.isPublic) {
@@ -893,7 +927,6 @@ export default function ShapeTalkPage() {
     try {
       const newGroup = await createBotGroupInFirestore({ ...groupData, ownerUserId: currentUser.uid, botIds: [], memberUserIds: [currentUser.uid] });
       setBotGroups(prev => [...prev, newGroup]);
-      // Bot Group channels are global for now, not server-specific
       const groupChannel: Channel = {
         id: `group_${newGroup.id}`,
         name: newGroup.name,
@@ -905,7 +938,7 @@ export default function ShapeTalkPage() {
       };
       setChannels(prev => [...prev, groupChannel]);
       setActiveChannelId(groupChannel.id);
-      setActiveServerId(null); // Switch to global/group view
+      setActiveServerId(null); 
       toast({ title: "Group Created", description: `Group "${newGroup.name}" is ready.` });
     } catch (error) {
       console.error("Error creating bot group:", error);
@@ -969,7 +1002,8 @@ export default function ShapeTalkPage() {
       setBotGroups(prev => prev.filter(g => g.id !== groupId));
       setChannels(prev => prev.filter(c => !(c.isBotGroup && c.groupId === groupId) ));
       if (activeChannelId === `group_${groupId}`) {
-        setActiveChannelId(channels.find(c => !c.isBotGroup && !c.serverId && c.id === DEFAULT_BOT_CHANNEL_ID)?.id || null); // Fallback to default DM
+        const globalDefaultDM = directMessages.find(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
+        setActiveChannelId(globalDefaultDM?.id || channels.find(c => c.id === AI_LOUNGE_CHANNEL_ID)?.id || null); 
         setActiveServerId(null);
       }
       toast({ title: "Group Deleted", description: "The bot group has been deleted." });
@@ -1032,15 +1066,97 @@ export default function ShapeTalkPage() {
 
   const handleServerCreated = (newServer: Server) => {
     setServers(prev => [...prev, newServer]);
-    setActiveServerId(newServer.id); // Activate the new server
-    setActiveChannelId(null); // Let useEffect pick a default channel or show "no channels"
+    setActiveServerId(newServer.id); 
+    setActiveChannelId(null); 
     setIsCreateServerDialogOpen(false);
     toast({ title: "Server Created!", description: `Server "${newServer.name}" is ready.` });
   };
 
+  // --- Typing Indicator Logic ---
+  const handleUserTyping = useCallback(async (isTyping: boolean) => {
+    if (!currentUser || !activeChannelId) return;
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = null;
+    }
+
+    if (isTyping) {
+      await setTypingIndicatorInFirestore({
+        userId: currentUser.uid,
+        userName: currentUser.name || 'Someone',
+        channelId: activeChannelId,
+        timestamp: Date.now() // Client-side timestamp for immediate UI update
+      });
+      // Optimistically update local state, Firestore listener will confirm/correct
+      setTypingUsers(prev => {
+        const existing = prev.find(tu => tu.userId === currentUser.uid && tu.channelId === activeChannelId);
+        if (existing) return prev.map(tu => tu.userId === currentUser.uid && tu.channelId === activeChannelId ? {...tu, timestamp: Date.now()} : tu);
+        return [...prev, { userId: currentUser.uid, userName: currentUser.name || 'Someone', channelId: activeChannelId, timestamp: Date.now() }];
+      });
+
+      typingTimeoutRef.current = setTimeout(async () => {
+        await removeTypingIndicatorFromFirestore(activeChannelId, currentUser.uid);
+        // Optimistic removal after timeout, Firestore listener will also clean up
+        setTypingUsers(prev => prev.filter(tu => !(tu.userId === currentUser.uid && tu.channelId === activeChannelId)));
+      }, TYPING_INDICATOR_TIMEOUT);
+
+    } else {
+      await removeTypingIndicatorFromFirestore(activeChannelId, currentUser.uid);
+      setTypingUsers(prev => prev.filter(tu => !(tu.userId === currentUser.uid && tu.channelId === activeChannelId)));
+    }
+  }, [currentUser, activeChannelId]);
+
+  // Firestore listener for typing indicators in the active channel
+  useEffect(() => {
+    if (!activeChannelId || !currentUser) {
+      setTypingUsers([]); // Clear typing users if no active channel or user
+      return;
+    }
+
+    const q = query(
+      collection(db, 'typingIndicators'),
+      where('channelId', '==', activeChannelId)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const now = Date.now();
+      const indicators: TypingIndicator[] = [];
+      const batch = writeBatch(db);
+      let needsBatchCommit = false;
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Omit<TypingIndicator, 'timestamp'> & { timestamp: Timestamp }; // Firestore timestamp
+        const indicator: TypingIndicator = {
+          userId: data.userId,
+          userName: data.userName,
+          channelId: data.channelId,
+          timestamp: data.timestamp.toMillis() // Convert Firestore Timestamp to JS number
+        };
+
+        if (indicator.userId !== currentUser.uid && (now - indicator.timestamp) < TYPING_INDICATOR_TIMEOUT) {
+          indicators.push(indicator);
+        } else if ((now - indicator.timestamp) >= TYPING_INDICATOR_TIMEOUT) {
+          // Indicator is stale, mark for deletion
+          batch.delete(docSnap.ref);
+          needsBatchCommit = true;
+        }
+      });
+
+      if (needsBatchCommit) {
+        batch.commit().catch(err => console.error("Error batch deleting stale typing indicators:", err));
+      }
+      setTypingUsers(indicators);
+    });
+
+    return () => unsubscribe();
+  }, [activeChannelId, currentUser]);
+  // --- End Typing Indicator Logic ---
+
+
   const allAvailableChannels = activeServerId 
     ? channels.filter(c => c.serverId === activeServerId)
-    : [...directMessages, ...channels.filter(c => !c.serverId)]; // Global channels and DMs
+    : [...directMessages, ...channels.filter(c => !c.serverId)]; 
 
   const activeChannelDetails = currentUser && activeChannelId ? allAvailableChannels.find(c => c.id === activeChannelId) || null : null;
 
@@ -1092,19 +1208,18 @@ export default function ShapeTalkPage() {
     );
   }
 
-  // Determine which channels to pass to AppSidebar based on activeServerId
   const channelsForSidebar = activeServerId 
     ? channels.filter(c => c.serverId === activeServerId)
-    : channels.filter(c => !c.serverId); // Global channels if no server is active
+    : channels.filter(c => !c.serverId); 
 
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="flex h-screen max-h-screen overflow-hidden bg-background">
         <AppSidebar
           servers={servers}
-          channels={channelsForSidebar} // Pass filtered channels
-          directMessages={directMessages} // DMs are always global in this model
-          botGroups={botGroups} // Bot Groups are global for now
+          channels={channelsForSidebar} 
+          directMessages={directMessages} 
+          botGroups={botGroups} 
           currentUser={currentUser}
           activeServerId={activeServerId}
           activeChannelId={activeChannelId}
@@ -1112,7 +1227,7 @@ export default function ShapeTalkPage() {
           onSelectChannel={handleSelectChannel}
           onOpenAccountSettings={handleOpenAccountSettings}
           onOpenCreateServerDialog={() => setIsCreateServerDialogOpen(true)}
-          onAddChannel={handleAddChannel} // AddChannel will use activeServerId if present
+          onAddChannel={handleAddChannel} 
           onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
           onOpenCreateBotGroupDialog={handleOpenCreateBotGroupDialog}
           onOpenManageBotGroupDialog={handleOpenManageBotGroupDialog}
@@ -1144,6 +1259,8 @@ export default function ShapeTalkPage() {
               onOpenBotSettings={handleOpenBotSettings}
               onDeleteBot={handleDeleteBot}
               onOpenManageGroupDialog={currentUser && activeChannelDetails?.isBotGroup && activeChannelDetails?.groupId ? handleOpenManageBotGroupDialog : undefined}
+              onUserTyping={handleUserTyping}
+              typingUsers={typingUsers.filter(tu => tu.channelId === activeChannelId && tu.userId !== currentUser?.uid)}
             />
             </>
           )}
@@ -1201,3 +1318,6 @@ export default function ShapeTalkPage() {
     </SidebarProvider>
   );
 }
+
+    
+    

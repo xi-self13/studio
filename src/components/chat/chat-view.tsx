@@ -1,10 +1,11 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import type { Message, User, Channel, BotConfig } from '@/types';
+import type { Message, User, Channel, BotConfig, TypingIndicator } from '@/types';
 import { MessageItem } from './message-item';
 import { MessageInput } from './message-input';
-import { AiChatDialog } from '@/components/ai/image-generator-dialog';
+import { AiChatDialog } from '@/components/ai/image-generator-dialog'; // This seems to be misnamed, it's an AI Chat dialog
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,8 @@ interface ChatViewProps {
   onOpenBotSettings: (botId: string) => void;
   onDeleteBot: (botId: string) => Promise<void>; 
   onOpenManageGroupDialog?: (groupId: string) => void; 
+  onUserTyping: (isTyping: boolean) => void; // New prop
+  typingUsers: TypingIndicator[]; // New prop
 }
 
 export function ChatView({
@@ -46,6 +49,8 @@ export function ChatView({
   onOpenBotSettings,
   onDeleteBot,
   onOpenManageGroupDialog,
+  onUserTyping,
+  typingUsers,
 }: ChatViewProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -55,7 +60,7 @@ export function ChatView({
     if (viewportRef.current) {
       viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
     }
-  }, [messages, activeChannel]);
+  }, [messages, activeChannel, typingUsers]); // Added typingUsers to dependencies
 
   const handleOpenAiShapeChatDialog = () => {
     if (!currentUser) {
@@ -86,10 +91,16 @@ export function ChatView({
                 isOpen={isAiChatDialogOpen}
                 onOpenChange={setIsAiChatDialogOpen}
                 onAiResponse={async (responseData) => {
-                  onSendAiResponseMessage(activeChannel?.id || "placeholder_channel", responseData);
+                  // Ensure activeChannel is not null before trying to access its id
+                  if (activeChannel) {
+                    onSendAiResponseMessage(activeChannel.id, responseData);
+                  } else {
+                    // Handle the case where activeChannel is null, perhaps show a toast
+                    console.error("Cannot send AI response, no active channel selected.");
+                  }
                 }}
                 currentUserId={currentUser?.uid}
-                activeChannelId={activeChannel?.id || null}
+                activeChannelId={activeChannel?.id || null} // Pass null if activeChannel is null
             />
          )}
       </div>
@@ -110,7 +121,6 @@ export function ChatView({
     if (!activeChannel) return <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
     if (activeChannel.type === 'dm') {
       const otherUserId = activeChannel.members?.find(id => id !== currentUser?.uid);
-      // Ensure users array is populated before trying to find otherUser
       const otherUser = otherUserId && users.length > 0 ? users.find(u => u.uid === otherUserId) : null;
 
 
@@ -137,6 +147,11 @@ export function ChatView({
                           userBots.some(bot => bot.id === activeChannel.botId && bot.ownerUserId === currentUser.uid);
 
   const isOwnBotGroupChannel = activeChannel.isBotGroup && activeChannel.groupId && onOpenManageGroupDialog;
+  
+  const typingUsersText = typingUsers
+    .filter(tu => tu.userId !== currentUser.uid) // Don't show self-typing
+    .map(tu => tu.userName)
+    .join(', ');
 
   return (
     <div className="flex-1 flex flex-col bg-background h-full max-h-screen">
@@ -225,11 +240,18 @@ export function ChatView({
           })}
         </div>
       </ScrollArea>
+      
+      {typingUsersText && (
+        <div className="px-4 pb-1 pt-0 text-xs text-muted-foreground italic h-5">
+          {typingUsersText} {typingUsers.length > 1 ? 'are' : 'is'} typing...
+        </div>
+      )}
 
       <MessageInput
         onSendMessage={(content) => onSendMessage(activeChannel.id, content)}
         onOpenAiChat={handleOpenAiShapeChatDialog}
         disabled={!activeChannel || !currentUser}
+        onUserTyping={onUserTyping}
       />
       {activeChannel && currentUser && (
         <AiChatDialog
@@ -248,3 +270,4 @@ export function ChatView({
   );
 }
 
+    

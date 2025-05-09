@@ -1,23 +1,26 @@
+
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ShapePalette } from '@/components/shape/shape-palette';
 import type { Shape } from '@/types';
-import { Send, Smile, Sparkles, Loader2 } from 'lucide-react'; // Changed Wand2 to Sparkles
+import { Send, Smile, Sparkles, Loader2 } from 'lucide-react'; 
 
 interface MessageInputProps {
   onSendMessage: (content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
-  onOpenAiChat: () => void; // Renamed from onOpenImageGenerator
+  onOpenAiChat: () => void; 
   disabled?: boolean;
+  onUserTyping: (isTyping: boolean) => void; // New prop
 }
 
-export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: MessageInputProps) {
+export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false, onUserTyping }: MessageInputProps) {
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isShapePaletteOpen, setIsShapePaletteOpen] = useState(false);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleSendText = async () => {
     if (text.trim() === '') return;
@@ -25,9 +28,9 @@ export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: 
     try {
       await onSendMessage({ type: 'text', text: text.trim() });
       setText('');
+      onUserTyping(false); // User sent message, so not typing anymore
     } catch (error) {
       console.error("Error sending message:", error);
-      // Optionally show a toast message for error
     } finally {
       setIsSending(false);
     }
@@ -35,9 +38,10 @@ export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: 
 
   const handleSendShape = async (shape: Shape) => {
     setIsSending(true);
-    setIsShapePaletteOpen(false); // Close palette after selection
+    setIsShapePaletteOpen(false); 
     try {
       await onSendMessage({ type: 'shape', shapeId: shape.id });
+      onUserTyping(false); 
     } catch (error) {
       console.error("Error sending shape message:", error);
     } finally {
@@ -49,8 +53,44 @@ export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       handleSendText();
+    } else {
+      onUserTyping(true); // User is typing
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      typingTimeoutRef.current = setTimeout(() => {
+        onUserTyping(false); // Assume user stopped typing if no input for a while
+      }, 2000); // 2 seconds timeout
     }
   };
+
+  const handleChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setText(event.target.value);
+    onUserTyping(true);
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    typingTimeoutRef.current = setTimeout(() => {
+      onUserTyping(false);
+    }, 2000);
+  };
+
+  const handleBlur = () => {
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    onUserTyping(false); // User blurred input, so not typing
+  };
+
+  useEffect(() => {
+    // Cleanup timeout on component unmount
+    return () => {
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+    };
+  }, []);
+
 
   return (
     <div className="p-4 border-t border-border bg-background sticky bottom-0">
@@ -72,8 +112,9 @@ export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: 
         </Button>
         <Textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
+          onBlur={handleBlur} // Handle blur to stop typing indicator
           placeholder="Type a message or send a shape..."
           className="flex-1 min-h-[40px] max-h-32 resize-none bg-input border-0 focus-visible:ring-1 focus-visible:ring-ring text-sm"
           disabled={disabled || isSending}
@@ -92,3 +133,5 @@ export function MessageInput({ onSendMessage, onOpenAiChat, disabled = false }: 
     </div>
   );
 }
+
+    
