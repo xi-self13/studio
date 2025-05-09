@@ -16,14 +16,15 @@ import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
 import { PREDEFINED_SHAPES } from '@/lib/shapes';
 import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
+import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog'; // Added
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { Separator } from '@/components/ui/separator';
-import { getUserBotConfigsFromFirestore } from '@/lib/firestoreService'; // Import Firestore service
+import { getUserBotConfigsFromFirestore } from '@/lib/firestoreService'; 
 
-const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // For the default bot using env vars
-const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID (uid) for the default bot
+const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
+const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; 
 
 export default function ShapeTalkPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -36,6 +37,7 @@ export default function ShapeTalkPage() {
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
   const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
+  const [isAccountSettingsDialogOpen, setIsAccountSettingsDialogOpen] = useState(false); // Added
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingUserBots, setIsLoadingUserBots] = useState(false);
 
@@ -56,7 +58,6 @@ export default function ShapeTalkPage() {
     setMessages(prev => [...prev, botMessage]);
   }, []);
 
-  // Initialize default bot user and channels
   useEffect(() => {
     const defaultBotUser: User = { 
       uid: DEFAULT_AI_BOT_USER_ID, 
@@ -94,14 +95,12 @@ export default function ShapeTalkPage() {
     checkApi();
   }, [toast]);
 
-  // Function to load user-specific bots from Firestore
   const loadUserBots = useCallback(async (userId: string) => {
     setIsLoadingUserBots(true);
     try {
       const fetchedBotConfigs = await getUserBotConfigsFromFirestore(userId);
       setUserBots(fetchedBotConfigs);
 
-      // Update users and directMessages states with these bots
       const botUsers: User[] = fetchedBotConfigs.map(bc => ({
         uid: bc.id,
         name: bc.name,
@@ -121,11 +120,10 @@ export default function ShapeTalkPage() {
       }));
       
       setUsers(prevUsers => {
-        const nonUserBots = prevUsers.filter(u => !u.isBot || u.uid === DEFAULT_AI_BOT_USER_ID); // Keep non-bots and default bot
+        const nonUserBots = prevUsers.filter(u => !u.isBot || u.uid === DEFAULT_AI_BOT_USER_ID); 
         return [...nonUserBots, ...botUsers.filter(bu => !nonUserBots.find(u => u.uid === bu.uid))];
       });
       setDirectMessages(prevDms => {
-        // Filter out DMs related to bots that might no longer exist for this user, then add new ones
         const existingUserDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId)));
         return [...existingUserDms, ...botDMs];
       });
@@ -138,7 +136,6 @@ export default function ShapeTalkPage() {
     }
   }, [toast]);
 
-  // Firebase Auth State Listener
   useEffect(() => {
     setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
@@ -157,11 +154,10 @@ export default function ShapeTalkPage() {
           if (existingUser) {
             return prevUsers.map(u => u.uid === appUser.uid ? appUser : u);
           }
-          // Keep default bot, remove other bots (they'll be re-added by loadUserBots)
           return [...prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID || !u.isBot), appUser];
         });
         
-        loadUserBots(firebaseUser.uid); // Load user-specific bots
+        loadUserBots(firebaseUser.uid); 
 
         if (!activeChannelId && channels.length > 0) {
           setActiveChannelId(channels[0].id);
@@ -169,9 +165,9 @@ export default function ShapeTalkPage() {
         setAuthError(null);
       } else {
         setCurrentUser(null);
-        setUsers(prevUsers => prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID)); // Keep only default bot
-        setUserBots([]); // Clear user-specific bots
-        setDirectMessages([]); // Clear DMs related to user bots
+        setUsers(prevUsers => prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID)); 
+        setUserBots([]); 
+        setDirectMessages([]); 
         setActiveChannelId(null); 
       }
     });
@@ -340,11 +336,10 @@ export default function ShapeTalkPage() {
           botApiKeyToUse = userBotConfig.apiKey;
           botShapeUsernameToUse = userBotConfig.shapeUsername;
         } else {
-          // This case should ideally not happen if states are synced correctly
           sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the configuration for this bot. It might have been removed.", "text");
           return;
         }
-      } else { // Using default bot
+      } else { 
         if (!isApiHealthy) {
           sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm currently unable to connect to my services. Please check the API status or try again later.", "text");
           return;
@@ -364,8 +359,8 @@ export default function ShapeTalkPage() {
           contextShapeId: contextShapeForBot.id, 
           userId: currentUser.uid, 
           channelId: channelId,
-          botApiKey: botApiKeyToUse, // Will be undefined for default bot, using env vars
-          botShapeUsername: botShapeUsernameToUse, // Will be undefined for default bot, using env vars
+          botApiKey: botApiKeyToUse, 
+          botShapeUsername: botShapeUsernameToUse, 
         });
         
         sendBotMessageUtil(channelId, botUserIdToUse, aiResponse.responseText, "ai_response", content.text, contextShapeForBot.id);
@@ -415,7 +410,12 @@ export default function ShapeTalkPage() {
         toast({title: "Login Required", description: "Please login to access settings.", variant: "destructive"});
         return;
     }
-    toast({ title: "Settings Clicked", description: "Settings panel would open here." });
+    setIsAccountSettingsDialogOpen(true); // Open account settings dialog
+  };
+
+  const handleAccountUpdate = (updatedUser: User) => {
+    setCurrentUser(updatedUser);
+    setUsers(prevUsers => prevUsers.map(u => u.uid === updatedUser.uid ? updatedUser : u));
   };
 
   const handleAddChannel = () => {
@@ -438,9 +438,8 @@ export default function ShapeTalkPage() {
     }
   };
 
-  // This function is called by CreateBotDialog after successful Firestore save
   const handleBotCreatedLocally = (botConfig: BotConfig) => {
-    if (!currentUser) return; // Should not happen if dialog was opened by logged-in user
+    if (!currentUser) return; 
 
     setUserBots(prev => [...prev, botConfig]);
 
@@ -585,12 +584,20 @@ export default function ShapeTalkPage() {
         </SidebarInset>
       </div>
       {currentUser && (
-        <CreateBotDialog
-          isOpen={isCreateBotDialogOpen}
-          onOpenChange={setIsCreateBotDialogOpen}
-          onBotCreated={handleBotCreatedLocally} // Use the local handler
-          currentUserId={currentUser.uid} 
-        />
+        <>
+          <CreateBotDialog
+            isOpen={isCreateBotDialogOpen}
+            onOpenChange={setIsCreateBotDialogOpen}
+            onBotCreated={handleBotCreatedLocally}
+            currentUserId={currentUser.uid} 
+          />
+          <AccountSettingsDialog
+            isOpen={isAccountSettingsDialogOpen}
+            onOpenChange={setIsAccountSettingsDialogOpen}
+            currentUser={currentUser}
+            onAccountUpdate={handleAccountUpdate}
+          />
+        </>
       )}
     </SidebarProvider>
   );

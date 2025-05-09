@@ -8,7 +8,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { format } from 'date-fns';
 import { Bot } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface MessageItemProps {
   message: Message;
@@ -43,6 +44,14 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
     );
   }
 
+  const markdownComponents = {
+    // Customize how specific Markdown elements are rendered if needed
+    // For example, to add Tailwind classes to paragraphs or links:
+    p: ({node, ...props}: any) => <p className="text-sm whitespace-pre-wrap" {...props} />,
+    a: ({node, ...props}: any) => <a className="text-primary hover:underline" {...props} />,
+    // Add more custom renderers as needed (e.g., for headings, lists, code blocks)
+  };
+
   return (
     <div className={`flex gap-3 p-3 hover:bg-muted/30 transition-colors duration-150 ${isOwnMessage ? 'flex-row-reverse' : ''}`}>
       {!isOwnMessage && getAvatar()}
@@ -53,10 +62,14 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
             {format(new Date(message.timestamp), 'p')}
           </span>
         </div>
-        <div className={`mt-1 max-w-md lg:max-w-lg xl:max-w-xl break-words ${
+        <div className={`mt-1 max-w-md lg:max-w-lg xl:max-w-xl break-words prose prose-sm dark:prose-invert prose-p:my-0 prose-headings:my-1 ${ // Added prose classes for markdown styling
            message.content.type !== 'ai_response' && (isOwnMessage ? 'bg-primary text-primary-foreground rounded-lg p-2' : 'bg-secondary text-secondary-foreground rounded-lg p-2')
         }`}>
-          {message.content.type === 'text' && <p className="text-sm whitespace-pre-wrap">{message.content.text}</p>}
+          {message.content.type === 'text' && (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {message.content.text}
+            </ReactMarkdown>
+          )}
           {message.content.type === 'shape' && (
             () => {
               const shape = getShapeById(message.content.shapeId);
@@ -84,12 +97,14 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
                   <CardTitle className="text-sm font-medium text-card-foreground">AI Response</CardTitle>
                 )}
               </CardHeader>
-              <CardContent className="px-4 pb-3 space-y-2">
-                <p className="text-sm whitespace-pre-wrap text-card-foreground">{message.content.textResponse}</p>
+              <CardContent className="px-4 pb-3 space-y-2 prose prose-sm dark:prose-invert prose-p:my-0 prose-headings:my-1">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                  {message.content.textResponse}
+                </ReactMarkdown>
                 {message.content.sourceShapeId && (() => {
                   const shape = getShapeById(message.content.sourceShapeId);
                   return shape ? (
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex items-center gap-2 mt-2 not-prose"> {/* Added not-prose to prevent shape display from being styled by prose */}
                        <ShapeDisplay svgString={shape.svgString} size={32} color="hsl(var(--card-foreground))" />
                        <span className="text-xs text-muted-foreground">Related shape: {shape.name}</span>
                     </div>
