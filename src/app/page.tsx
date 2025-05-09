@@ -250,7 +250,7 @@ export default function ShapeTalkPage() {
     }
   }
   // Use the named function in useCallback
-  const loadUserBots = useCallback(fetchUserBotsLogic, [toast, platformAndPublicAis]); // platformAndPublicAis might not be needed here
+  const loadUserBots = useCallback(fetchUserBotsLogic, [toast]); 
   
   // Define the async logic as a named function
   async function fetchUserBotGroupsLogic(userId: string) {
@@ -288,7 +288,7 @@ export default function ShapeTalkPage() {
 
   // Define the async logic for onAuthStateChanged callback
   async function handleAuthStateChangeLogic(firebaseUser: FirebaseUser | null) {
-    setIsLoadingAuth(false); // Moved here to ensure it's set after async ops if any
+    setIsLoadingAuth(false); 
     if (firebaseUser) {
       const userDocRef = doc(db, 'users', firebaseUser.uid);
       const userSnap = await getDoc(userDocRef);
@@ -320,8 +320,8 @@ export default function ShapeTalkPage() {
         return [appUser, ...otherUsers];
       });
 
-      await loadUserBots(firebaseUser.uid); // await here if needed, or let it run
-      await loadUserBotGroups(firebaseUser.uid); // await here
+      await loadUserBots(firebaseUser.uid); 
+      await loadUserBotGroups(firebaseUser.uid); 
 
       if (!activeChannelId || ![...channels, ...directMessages].find(c => c.id === activeChannelId)) {
          const generalChannel = channels.find(c => c.id === 'general');
@@ -332,7 +332,7 @@ export default function ShapeTalkPage() {
       setAuthError(null);
     } else {
       setCurrentUser(null);
-      setUsers(prevUsers => prevUsers.filter(u => u.isBot)); // Keep only bots
+      setUsers(prevUsers => prevUsers.filter(u => u.isBot)); 
       setUserBots([]);
       setDirectMessages([]);
       setBotGroups([]);
@@ -340,13 +340,15 @@ export default function ShapeTalkPage() {
       setActiveChannelId(channels.find(c => c.id === 'general')?.id || null);
     }
   }
+  
+  const memoizedHandleAuthStateChangeLogic = useCallback(handleAuthStateChangeLogic, [loadUserBots, loadUserBotGroups, activeChannelId, channels, directMessages, toast /* Add other stable dependencies like setters if directly used */]);
+
 
   useEffect(() => {
     setIsLoadingAuth(true);
-    const unsubscribe = onAuthStateChanged(auth, handleAuthStateChangeLogic);
+    const unsubscribe = onAuthStateChanged(auth, memoizedHandleAuthStateChangeLogic);
     return () => unsubscribe();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Dependencies: loadUserBots, loadUserBotGroups. Consider if they should be stable references.
+  }, [auth, memoizedHandleAuthStateChangeLogic]);
 
   const handleFirebaseAuthError = (error: any, actionType: "Login" | "Sign Up") => {
     console.error(`${actionType} error:`, error);
@@ -447,7 +449,6 @@ export default function ShapeTalkPage() {
     }
   };
   const handleLogout = async () => {
-    // setIsLoadingAuth(true); // Not needed here, onAuthStateChanged will handle state
     try {
       await signOut(auth);
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
@@ -510,21 +511,19 @@ export default function ShapeTalkPage() {
       let botSystemPrompt: string | undefined = undefined;
       
       const foundBotConfig = userBots.find(b => b.id === currentChannel.botId) || 
-                             platformAndPublicAis.find(p => p.id === currentChannel.botId && p.isUserCreated) as (PlatformShape & { apiKey?: string }); // Explicit cast for safety
+                             platformAndPublicAis.find(p => p.id === currentChannel.botId && p.isUserCreated) as (PlatformShape & { apiKey?: string }); 
 
       if (currentChannel.botId && currentChannel.botId !== DEFAULT_AI_BOT_USER_ID) {
-          // For user bots, we need the API key which is stored in userBots state or fetched from Firestore
           const actualBotConfig = userBots.find(b => b.id === currentChannel.botId) || await getBotConfigFromFirestore(currentChannel.botId);
-        if (actualBotConfig && actualBotConfig.apiKey !== '***') { // Ensure apiKey is not the masked one
+        if (actualBotConfig && actualBotConfig.apiKey !== '***') { 
           botUserIdToUse = actualBotConfig.id;
           botApiKeyToUse = actualBotConfig.apiKey; 
           botShapeUsernameToUse = actualBotConfig.shapeUsername;
           botSystemPrompt = actualBotConfig.systemPrompt;
-        } else if (foundBotConfig && foundBotConfig.shapeUsername) { // Fallback for public bot from platformAndPublicAis if API key is not available
+        } else if (foundBotConfig && foundBotConfig.shapeUsername) { 
             botUserIdToUse = foundBotConfig.id;
             botShapeUsernameToUse = foundBotConfig.shapeUsername;
-            botSystemPrompt = (foundBotConfig as BotConfig).systemPrompt || foundBotConfig.description; // Use systemPrompt if BotConfig, else description
-            // botApiKeyToUse remains undefined, relying on default bot or error if Shapes.inc needs it
+            botSystemPrompt = (foundBotConfig as BotConfig).systemPrompt || foundBotConfig.description; 
             if(!botApiKeyToUse && !process.env.SHAPESINC_API_KEY) {
               sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "This bot's API key is not available for direct chat here, and no default API key is set.", "text");
               return;
@@ -534,7 +533,7 @@ export default function ShapeTalkPage() {
           sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the complete configuration for this bot.", "text");
           return;
         }
-      } else { // Default bot
+      } else { 
         if (isApiHealthy === false) { 
             sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm having trouble connecting to my services right now. Please try again later.", "text");
             return;
@@ -557,8 +556,8 @@ export default function ShapeTalkPage() {
           contextShapeId: contextShapeForBot.id,
           userId: currentUser.uid,
           channelId: channelId,
-          botApiKey: botApiKeyToUse, // Will use process.env.SHAPESINC_API_KEY if this is undefined
-          botShapeUsername: botShapeUsernameToUse, // Will use process.env.SHAPESINC_SHAPE_USERNAME if this is undefined
+          botApiKey: botApiKeyToUse, 
+          botShapeUsername: botShapeUsernameToUse, 
           systemPrompt: botSystemPrompt,
         });
 
@@ -590,14 +589,13 @@ export default function ShapeTalkPage() {
              sendBotMessageUtil(channelId, randomPlatformAi.id, "Missing context for the lounge chat.", "text");
             return;
         }
-        // For AI Lounge, we assume platform AIs or public user bots don't use individual API keys client-side for this interaction.
-        // The chatWithShape flow should use the default Shapes.inc API key from env vars if botApiKey is not provided.
+        
         const aiResponse = await chatWithShape({
           promptText: content.text,
           contextShapeId: contextShapeForLounge.id,
           userId: currentUser.uid,
           channelId: channelId,
-          botShapeUsername: randomPlatformAi.shapeUsername, // Specific AI username
+          botShapeUsername: randomPlatformAi.shapeUsername, 
           systemPrompt: randomPlatformAi.description, 
         });
         sendBotMessageUtil(channelId, randomPlatformAi.id, aiResponse.responseText, "ai_response", content.text, contextShapeForLounge.id);
@@ -803,7 +801,7 @@ export default function ShapeTalkPage() {
         name: updatedGroupData.name,
         description: updatedGroupData.description,
         avatarUrl: updatedGroupData.avatarUrl,
-        botIds: updatedGroupData.botIds, // botIds are managed separately usually but here for simplicity
+        botIds: updatedGroupData.botIds, 
       });
       const fullyUpdatedGroup = { ...selectedGroupToManage, ...updatedGroupData };
 
@@ -815,7 +813,7 @@ export default function ShapeTalkPage() {
         return c;
       }));
       toast({ title: "Group Updated", description: `Group "${fullyUpdatedGroup.name}" has been updated.` });
-      setSelectedGroupToManage(fullyUpdatedGroup); // Keep dialog open with updated data
+      setSelectedGroupToManage(fullyUpdatedGroup); 
     } catch (error) {
       console.error("Error updating bot group:", error);
       toast({ title: "Group Update Failed", description: (error as Error).message, variant: "destructive" });
@@ -852,10 +850,10 @@ export default function ShapeTalkPage() {
     setIsUpdatingGroup(true);
     try {
         await addBotToGroupInFirestore(groupId, botId);
-        const updatedGroup = await getBotGroupFS(groupId); // Refetch to get updated botIds
+        const updatedGroup = await getBotGroupFS(groupId); 
         if (updatedGroup) {
             setBotGroups(prev => prev.map(g => g.id === groupId ? updatedGroup : g));
-            setSelectedGroupToManage(updatedGroup); // Update dialog state
+            setSelectedGroupToManage(updatedGroup); 
              setChannels(prev => prev.map(c => {
                 if (c.isBotGroup && c.groupId === updatedGroup.id) {
                 return { ...c, members: [updatedGroup.ownerUserId, ...(updatedGroup.botIds || [])] };
@@ -876,7 +874,7 @@ export default function ShapeTalkPage() {
     setIsUpdatingGroup(true);
     try {
         await removeBotFromGroupInFirestore(groupId, botId);
-        const updatedGroup = await getBotGroupFS(groupId); // Refetch
+        const updatedGroup = await getBotGroupFS(groupId); 
         if (updatedGroup) {
             setBotGroups(prev => prev.map(g => g.id === groupId ? updatedGroup : g));
             setSelectedGroupToManage(updatedGroup);
@@ -898,7 +896,7 @@ export default function ShapeTalkPage() {
 
   const activeChannelDetails = currentUser ? [...channels, ...directMessages].find(c => c.id === activeChannelId) || null : null;
 
-  if (isLoadingAuth || (!currentUser && !authError)) { // Show loader only if not errored and no user yet
+  if (isLoadingAuth) {
     return (
       <div className="flex items-center justify-center h-screen bg-background text-foreground">
         <Loader2 className="h-12 w-12 animate-spin text-primary mr-4" />
@@ -928,17 +926,17 @@ export default function ShapeTalkPage() {
             </div>
             {authError && <p className="text-sm text-destructive">{authError}</p>}
             <div className="flex flex-col sm:flex-row gap-2">
-                <Button type="submit" className="flex-1" disabled={isLoadingAuth && !authError}>
-                  {(isLoadingAuth && !authError) ? <Loader2 className="animate-spin" /> : <LogIn />} Sign In
+                <Button type="submit" className="flex-1" disabled={isLoadingAuth}>
+                  {isLoadingAuth ? <Loader2 className="animate-spin" /> : <LogIn />} Sign In
                 </Button>
-                 <Button type="button" variant="outline" onClick={handleEmailPasswordSignUp} className="flex-1" disabled={isLoadingAuth && !authError}>
-                  {(isLoadingAuth && !authError) ? <Loader2 className="animate-spin" /> : <UserPlus />} Sign Up
+                 <Button type="button" variant="outline" onClick={handleEmailPasswordSignUp} className="flex-1" disabled={isLoadingAuth}>
+                  {isLoadingAuth ? <Loader2 className="animate-spin" /> : <UserPlus />} Sign Up
                 </Button>
             </div>
           </form>
           <Separator className="my-6" />
-          <Button onClick={handleGoogleLogin} variant="outline" className="w-full" disabled={isLoadingAuth && !authError}>
-            {(isLoadingAuth && !authError) ? <Loader2 className="animate-spin" /> : <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /><path d="M1 1h22v22H1z" fill="none" /></svg>} Sign in with Google
+          <Button onClick={handleGoogleLogin} variant="outline" className="w-full" disabled={isLoadingAuth}>
+            {isLoadingAuth ? <Loader2 className="animate-spin" /> : <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" /><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" /><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" /><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" /><path d="M1 1h22v22H1z" fill="none" /></svg>} Sign in with Google
           </Button>
         </div>
       </div>
@@ -1039,4 +1037,3 @@ export default function ShapeTalkPage() {
     </SidebarProvider>
   );
 }
-
