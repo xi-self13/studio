@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -41,8 +40,10 @@ interface AiChatDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onAiResponse: (responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => void;
-  currentUserId?: string; // Can be undefined if user is not logged in
-  activeChannelId: string | null; // Can be null if no channel is active for posting
+  currentUserId?: string; 
+  activeChannelId: string | null;
+  // Optional: Pass API health status if dialog needs to behave differently
+  // isApiHealthy?: boolean | null; 
 }
 
 export function AiChatDialog({ 
@@ -50,7 +51,8 @@ export function AiChatDialog({
   onOpenChange, 
   onAiResponse,
   currentUserId,
-  activeChannelId 
+  activeChannelId,
+  // isApiHealthy 
 }: AiChatDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -63,7 +65,6 @@ export function AiChatDialog({
     },
   });
 
-  // Reset form when dialog closes or relevant IDs change
   useEffect(() => {
     if (!isOpen) {
       form.reset({
@@ -83,6 +84,13 @@ export function AiChatDialog({
       return;
     }
 
+    // Optional: Check isApiHealthy if it were passed and activeChannelId is the bot channel
+    // if (activeChannelId === 'shapes-ai' && isApiHealthy === false) {
+    //   toast({ title: "API Unhealthy", description: "The AI service is currently unavailable.", variant: "destructive" });
+    //   setIsLoading(false);
+    //   return;
+    // }
+
     setIsLoading(true);
     try {
       const selectedShape = getShapeById(data.shapeId);
@@ -95,8 +103,8 @@ export function AiChatDialog({
       const result = await chatWithShape({
         promptText: data.promptText,
         shapeId: data.shapeId,
-        userId: currentUserId, // Ensured to be string by the check above
-        channelId: activeChannelId, // Ensured to be string by the check above
+        userId: currentUserId, 
+        channelId: activeChannelId, 
       });
 
       onAiResponse({ 
@@ -105,12 +113,13 @@ export function AiChatDialog({
         sourceShapeId: data.shapeId 
       });
       toast({ title: "Success!", description: "AI response received and added to chat." });
-      onOpenChange(false); // This will trigger form.reset() via useEffect
+      onOpenChange(false);
     } catch (error) {
-      console.error("Error getting AI response:", error);
+      console.error("Error getting AI response from dialog:", error);
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while contacting AI.";
       toast({
         title: "Error Contacting AI",
-        description: error instanceof Error ? error.message : "An unknown error occurred.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -118,11 +127,11 @@ export function AiChatDialog({
     }
   };
 
-  const canSubmit = !!activeChannelId && !!currentUserId;
+  const canSubmit = !!activeChannelId && !!currentUserId; // Basic check
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
-      if (!isLoading) {
+      if (!isLoading) { // Prevent closing while loading
         onOpenChange(open);
       }
     }}>
@@ -130,8 +139,13 @@ export function AiChatDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><MessageSquareText className="text-primary" /> Chat with AI about a Shape</DialogTitle>
           <DialogDescription>
-            Ask the AI something related to the selected shape or your prompt. 
-            {!canSubmit && <span className="text-destructive block mt-1">A user and active channel are required to send.</span>}
+            Ask the AI something related to the selected shape. Your message will be posted to the current channel.
+            {!canSubmit && <span className="text-destructive block mt-1">A user and active channel are required.</span>}
+            {/* Optional: Display API status if relevant for this dialog's context
+            {activeChannelId === 'shapes-ai' && isApiHealthy === false && (
+              <span className="text-destructive block mt-1">AI services are currently unavailable.</span>
+            )}
+            */}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -143,7 +157,7 @@ export function AiChatDialog({
                 <FormItem>
                   <FormLabel>Your Message to AI</FormLabel>
                   <FormControl>
-                    <Textarea placeholder="e.g., Tell me a story about this shape" {...field} />
+                    <Textarea placeholder="e.g., What is special about this shape?" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -170,7 +184,7 @@ export function AiChatDialog({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading || !canSubmit}>
+              <Button type="submit" disabled={isLoading || !canSubmit /* || (activeChannelId === 'shapes-ai' && isApiHealthy === false) */}>
                 {isLoading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
