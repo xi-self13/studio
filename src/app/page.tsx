@@ -1,14 +1,15 @@
+
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
-import type { Channel, Message, User, BotConfig, PlatformShape, BotGroup, Server, TypingIndicator } from '@/types'; // Added Server and TypingIndicator
-import { AppSidebar } from '@/components/sidebar/sidebar-content';
-import { ChatView } from '@/components/chat/chat-view';
-import { SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/components/ui/sidebar';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { Channel, Message, User, BotConfig, PlatformShape, BotGroup, Server, TypingIndicator } from '@/types';
+import { ServerRail } from '@/components/sidebar/server-rail'; 
+import { MainChannelSidebarContent } from '@/components/sidebar/main-channel-sidebar-content';
+import { Sidebar, SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Server as ServerIcon } from 'lucide-react'; // Added ServerIcon
+import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Server as ServerIcon } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react';
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
@@ -17,12 +18,12 @@ import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
 import { BotSettingsDialog } from '@/components/bot/bot-settings-dialog';
 import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog';
-import { CreateServerDialog } from '@/components/server/create-server-dialog'; // New Dialog
+import { CreateServerDialog } from '@/components/server/create-server-dialog';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth, db } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { Separator } from '@/components/ui/separator';
-import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp } from 'firebase/firestore'; // Added collection, onSnapshot, query, where, writeBatch, Timestamp
+import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp } from 'firebase/firestore';
 import { 
   getUserBotConfigsFromFirestore, 
   getPlatformShapesFromFirestore, 
@@ -33,8 +34,8 @@ import {
   updateUserProfileInFirestore, 
   createServerInFirestore, 
   getServersForUserFromFirestore, 
-  setTypingIndicatorInFirestore, // New
-  removeTypingIndicatorFromFirestore, // New
+  setTypingIndicatorInFirestore,
+  removeTypingIndicatorFromFirestore,
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -56,10 +57,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+} from "@/components/ui/alert-dialog";
+import { ChatView } from '@/components/chat/chat-view';
 
-const USERS_COLLECTION = 'users'; // Define USERS_COLLECTION
-const TYPING_INDICATOR_TIMEOUT = 5000; // 5 seconds for typing indicator to disappear
+const USERS_COLLECTION = 'users';
+const TYPING_INDICATOR_TIMEOUT = 5000; 
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT';
@@ -99,7 +101,7 @@ export default function ShapeTalkPage() {
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
 
-  const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]); // New state for typing indicators
+  const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
 
@@ -213,7 +215,7 @@ export default function ShapeTalkPage() {
     
     setChannels(prevChannels => {
       const existingChannelIds = new Set(prevChannels.map(c => c.id));
-      const newStaticChannels = staticChannelsData.filter(sc => !existingChannelIds.has(sc.id) && sc.type === 'channel'); // Only add global channels here
+      const newStaticChannels = staticChannelsData.filter(sc => !existingChannelIds.has(sc.id) && sc.type === 'channel');
       const newStaticDms = staticChannelsData.filter(sc => !existingChannelIds.has(sc.id) && sc.type === 'dm');
       
       setDirectMessages(prevDms => {
@@ -278,7 +280,7 @@ export default function ShapeTalkPage() {
       setDirectMessages(prevDms => {
          const existingUserDmIds = new Set(prevDms.filter(dm => botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId))).map(dm => dm.id));
          const newBotDmsToAdd = botDMs.filter(ndm => !existingUserDmIds.has(ndm.id));
-         const otherDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId) || dm.botId === DEFAULT_AI_BOT_USER_ID)); // Keep default bot DM
+         const otherDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId) || dm.botId === DEFAULT_AI_BOT_USER_ID)); 
         return [...otherDms, ...newBotDmsToAdd];
       });
 
@@ -306,7 +308,6 @@ export default function ShapeTalkPage() {
         members: [userId, ...(group.botIds || [])], 
       }));
       
-      // Bot group channels are also global for now.
       setChannels(prev => {
         const existingGroupChannelIds = new Set(prev.filter(c => c.isBotGroup).map(c => c.id));
         const newGroupChannels = groupChannels.filter(gc => !existingGroupChannelIds.has(gc.id));
@@ -378,7 +379,6 @@ export default function ShapeTalkPage() {
         return [appUser, ...otherUsers];
       });
 
-      // Ensure default bot DM includes the current user as a member
       setDirectMessages(prevDMs => prevDMs.map(dm => {
         if (dm.botId === DEFAULT_AI_BOT_USER_ID) {
           return {...dm, members: [appUser.uid, DEFAULT_AI_BOT_USER_ID]};
@@ -396,7 +396,6 @@ export default function ShapeTalkPage() {
       setActiveServerId(null); 
       setUsers(prevUsers => prevUsers.filter(u => u.isBot)); 
       setUserBots([]);
-      // Clear user-specific DMs, keep only default bot DM (if any)
       setDirectMessages(prevDms => prevDms.filter(dm => dm.botId === DEFAULT_AI_BOT_USER_ID).map(dm => ({...dm, members: ['placeholderCurrentUser', DEFAULT_AI_BOT_USER_ID]})));
       setBotGroups([]); 
       
@@ -405,8 +404,7 @@ export default function ShapeTalkPage() {
       handleLogoutLogicForActiveChannel();
     }
   }, [
-      loadUserBots, loadUserBotGroups, loadUserServers, toast, setIsLoadingAuth, setCurrentUser, setUsers,
-      setUserBots, setDirectMessages, setBotGroups, setChannels, setAuthError,
+      loadUserBots, loadUserBotGroups, loadUserServers, 
       handleLogoutLogicForActiveChannel 
   ]);
   
@@ -416,7 +414,6 @@ export default function ShapeTalkPage() {
     return () => unsubscribe();
   }, [handleAuthStateChangeLogic]);
 
-  // Effect to set a default active channel when server or global context changes
   useEffect(() => {
     if (currentUser) {
       if (activeServerId) { 
@@ -579,8 +576,8 @@ export default function ShapeTalkPage() {
     }
   }, [currentUser, activeChannelId, channels, directMessages, userBots, isApiHealthy, messages, sendBotMessageUtil, hasSentInitialBotMessageForChannel]);
 
-  const handleSelectServer = (serverId: string) => {
-    if (serverId === activeServerId) return; // Avoid re-selecting the same server
+  const handleSelectServer = (serverId: string | null) => { // Allow null for DM view
+    if (serverId === activeServerId) return;
     setActiveServerId(serverId);
     setActiveChannelId(null); 
   };
@@ -604,7 +601,6 @@ export default function ShapeTalkPage() {
     };
     setMessages(prev => [...prev, newMessage]);
 
-    // Remove user's own typing indicator immediately after sending a message
     await removeTypingIndicatorFromFirestore(channelId, currentUser.uid);
     setTypingUsers(prev => prev.filter(tu => !(tu.channelId === channelId && tu.userId === currentUser.uid)));
 
@@ -1072,7 +1068,6 @@ export default function ShapeTalkPage() {
     toast({ title: "Server Created!", description: `Server "${newServer.name}" is ready.` });
   };
 
-  // --- Typing Indicator Logic ---
   const handleUserTyping = useCallback(async (isTyping: boolean) => {
     if (!currentUser || !activeChannelId) return;
 
@@ -1086,9 +1081,8 @@ export default function ShapeTalkPage() {
         userId: currentUser.uid,
         userName: currentUser.name || 'Someone',
         channelId: activeChannelId,
-        timestamp: Date.now() // Client-side timestamp for immediate UI update
+        timestamp: Date.now() 
       });
-      // Optimistically update local state, Firestore listener will confirm/correct
       setTypingUsers(prev => {
         const existing = prev.find(tu => tu.userId === currentUser.uid && tu.channelId === activeChannelId);
         if (existing) return prev.map(tu => tu.userId === currentUser.uid && tu.channelId === activeChannelId ? {...tu, timestamp: Date.now()} : tu);
@@ -1097,7 +1091,6 @@ export default function ShapeTalkPage() {
 
       typingTimeoutRef.current = setTimeout(async () => {
         await removeTypingIndicatorFromFirestore(activeChannelId, currentUser.uid);
-        // Optimistic removal after timeout, Firestore listener will also clean up
         setTypingUsers(prev => prev.filter(tu => !(tu.userId === currentUser.uid && tu.channelId === activeChannelId)));
       }, TYPING_INDICATOR_TIMEOUT);
 
@@ -1107,10 +1100,9 @@ export default function ShapeTalkPage() {
     }
   }, [currentUser, activeChannelId]);
 
-  // Firestore listener for typing indicators in the active channel
   useEffect(() => {
     if (!activeChannelId || !currentUser) {
-      setTypingUsers([]); // Clear typing users if no active channel or user
+      setTypingUsers([]); 
       return;
     }
 
@@ -1126,18 +1118,17 @@ export default function ShapeTalkPage() {
       let needsBatchCommit = false;
 
       snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Omit<TypingIndicator, 'timestamp'> & { timestamp: Timestamp }; // Firestore timestamp
+        const data = docSnap.data() as Omit<TypingIndicator, 'timestamp'> & { timestamp: Timestamp }; 
         const indicator: TypingIndicator = {
           userId: data.userId,
           userName: data.userName,
           channelId: data.channelId,
-          timestamp: data.timestamp.toMillis() // Convert Firestore Timestamp to JS number
+          timestamp: data.timestamp.toMillis() 
         };
 
         if (indicator.userId !== currentUser.uid && (now - indicator.timestamp) < TYPING_INDICATOR_TIMEOUT) {
           indicators.push(indicator);
         } else if ((now - indicator.timestamp) >= TYPING_INDICATOR_TIMEOUT) {
-          // Indicator is stale, mark for deletion
           batch.delete(docSnap.ref);
           needsBatchCommit = true;
         }
@@ -1151,7 +1142,6 @@ export default function ShapeTalkPage() {
 
     return () => unsubscribe();
   }, [activeChannelId, currentUser]);
-  // --- End Typing Indicator Logic ---
 
 
   const allAvailableChannels = activeServerId 
@@ -1161,7 +1151,7 @@ export default function ShapeTalkPage() {
   const activeChannelDetails = currentUser && activeChannelId ? allAvailableChannels.find(c => c.id === activeChannelId) || null : null;
 
 
-  if (isLoadingAuth) {
+  if (isLoadingAuth && !currentUser) { // Only show full page loader if auth is truly loading AND no user yet
     return (
       <div className="flex items-center justify-center h-screen bg-background text-foreground">
         <Loader2 className="h-12 w-12 animate-spin text-primary mr-4" />
@@ -1208,40 +1198,61 @@ export default function ShapeTalkPage() {
     );
   }
 
-  const channelsForSidebar = activeServerId 
-    ? channels.filter(c => c.serverId === activeServerId)
-    : channels.filter(c => !c.serverId); 
+  const channelsForMainSidebar = activeServerId
+    ? channels.filter(c => c.serverId === activeServerId && !c.isBotGroup && !c.isBotChannel && !c.isAiLounge)
+    : [];
+  
+  const botGroupsForMainSidebar = activeServerId ? [] : botGroups; // Assuming bot groups are global for now
+  const directMessagesForMainSidebar = activeServerId ? [] : directMessages;
+
 
   return (
-    <SidebarProvider defaultOpen={true}>
-      <div className="flex h-screen max-h-screen overflow-hidden bg-background">
-        <AppSidebar
-          servers={servers}
-          channels={channelsForSidebar} 
-          directMessages={directMessages} 
-          botGroups={botGroups} 
-          currentUser={currentUser}
-          activeServerId={activeServerId}
-          activeChannelId={activeChannelId}
-          onSelectServer={handleSelectServer}
-          onSelectChannel={handleSelectChannel}
-          onOpenAccountSettings={handleOpenAccountSettings}
-          onOpenCreateServerDialog={() => setIsCreateServerDialogOpen(true)}
-          onAddChannel={handleAddChannel} 
-          onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
-          onOpenCreateBotGroupDialog={handleOpenCreateBotGroupDialog}
-          onOpenManageBotGroupDialog={handleOpenManageBotGroupDialog}
-          onLogout={handleLogout}
-          isLoadingUserBots={isLoadingUserBots || isLoadingBotGroups}
-          isLoadingServers={isLoadingServers}
-        />
+    <div className="flex h-screen max-h-screen overflow-hidden bg-background">
+        {currentUser && (
+             <ServerRail
+                servers={servers}
+                currentUser={currentUser}
+                activeServerId={activeServerId}
+                onSelectServer={handleSelectServer}
+                onOpenCreateServerDialog={() => setIsCreateServerDialogOpen(true)}
+                isLoadingServers={isLoadingServers}
+            />
+        )}
+      
+      <SidebarProvider defaultOpen={true}>
+         {currentUser ? (
+            <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r border-sidebar-border">
+                <MainChannelSidebarContent
+                    channels={channelsForMainSidebar}
+                    directMessages={directMessagesForMainSidebar}
+                    botGroups={botGroupsForMainSidebar}
+                    currentUser={currentUser}
+                    activeServerId={activeServerId}
+                    activeChannelId={activeChannelId}
+                    serverName={activeServerId ? servers.find(s => s.id === activeServerId)?.name : "ShapeTalk"}
+                    onSelectChannel={handleSelectChannel}
+                    onOpenAccountSettings={handleOpenAccountSettings}
+                    onAddChannel={handleAddChannel}
+                    onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
+                    onOpenCreateBotGroupDialog={handleOpenCreateBotGroupDialog}
+                    onOpenManageBotGroupDialog={handleOpenManageBotGroupDialog}
+                    onLogout={handleLogout}
+                    isLoadingUserBots={isLoadingUserBots || isLoadingBotGroups}
+                />
+            </Sidebar>
+         ) : (
+            // Optional: A placeholder for the main sidebar area if user is not logged in
+            // but server rail is visible. Or, ServerRail also hides if !currentUser.
+            <div className="w-0 md:w-64 bg-sidebar-background border-r border-sidebar-border p-4 text-center text-sidebar-foreground shrink-0"></div>
+         )}
+
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
-          { (isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingServers) && !activeChannelDetails && currentUser && (
+          { (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingServers) && !activeChannelDetails && currentUser && (
             <div className="flex-1 flex items-center justify-center bg-background text-foreground">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           )}
-          { !((isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingServers) && !activeChannelDetails && currentUser) && (
+          { !((isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingServers) && !activeChannelDetails && currentUser) && (
             <>
             <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
               <MobileSidebarTrigger className="h-8 w-8">
@@ -1265,7 +1276,8 @@ export default function ShapeTalkPage() {
             </>
           )}
         </SidebarInset>
-      </div>
+      </SidebarProvider>
+      
       {currentUser && (
         <>
           <CreateBotDialog
@@ -1315,9 +1327,6 @@ export default function ShapeTalkPage() {
           )}
         </>
       )}
-    </SidebarProvider>
+    </div>
   );
 }
-
-    
-    
