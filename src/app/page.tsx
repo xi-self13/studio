@@ -1,8 +1,8 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
 import type { Channel, Message, User } from '@/types';
-import { PREDEFINED_SHAPES } from '@/lib/shapes';
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
@@ -11,61 +11,66 @@ import { PanelLeft } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash, Bot, Users } from 'lucide-react'; // Icons for channels
 
-// Mock Data
-const mockCurrentUser: User = {
-  id: 'user1',
-  name: 'You',
-  avatarUrl: 'https://picsum.photos/seed/user1/40/40',
-};
-
-const mockUsers: User[] = [
-  mockCurrentUser,
-  { id: 'user2', name: 'Alice', avatarUrl: 'https://picsum.photos/seed/alice/40/40' },
-  { id: 'user3', name: 'Bob', avatarUrl: 'https://picsum.photos/seed/bob/40/40' },
-  { id: 'AI_BOT', name: 'AI Bot', avatarUrl: '' }, 
-];
-
-const initialChannels: Channel[] = [
-  { id: 'general', name: 'general', type: 'channel', icon: Hash },
-  { id: 'shapes-ai', name: 'shapes-ai-chat', type: 'channel', icon: Bot }, 
-  { id: 'random', name: 'random', type: 'channel', icon: Hash },
-];
-
-const initialDMs: Channel[] = [
-  { id: 'dm_alice', name: 'Alice', type: 'dm', members: ['user1', 'user2'] },
-  { id: 'dm_bob', name: 'Bob', type: 'dm', members: ['user1', 'user3'] },
-];
-
-
 export default function ShapeTalkPage() {
-  const [channels, setChannels] = useState<Channel[]>(initialChannels);
-  const [directMessages, setDirectMessages] = useState<Channel[]>(initialDMs);
-  const [activeChannelId, setActiveChannelId] = useState<string | null>(initialChannels[0]?.id || null);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [directMessages, setDirectMessages] = useState<Channel[]>([]);
+  const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null); // Initialize currentUser as null
+  const [users, setUsers] = useState<User[]>([]); // Initialize users as empty array
+
   const { toast } = useToast();
 
-  // Effect to load some initial messages for demo
+  // Placeholder: In a real app, you would fetch current user, channels, DMs, users, etc.
+  // For now, we can set a mock current user after a delay to simulate login, or leave it null.
   useEffect(() => {
-    if(initialChannels[0]) {
-      setMessages([
-        { id: 'msg1', channelId: initialChannels[0].id, userId: 'user2', content: { type: 'text', text: 'Hello everyone! Welcome to ShapeTalk! 👋' }, timestamp: Date.now() - 200000 },
-        { id: 'msg2', channelId: initialChannels[0].id, userId: 'user3', content: { type: 'text', text: 'Hi Alice! This looks cool.' }, timestamp: Date.now() - 100000 },
-        { id: 'msg3', channelId: initialChannels[0].id, userId: 'user1', content: { type: 'text', text: 'Indeed! Let\'s try sending some shapes.' }, timestamp: Date.now() - 50000 },
-        { id: 'msg4', channelId: initialChannels[0].id, userId: 'user1', content: { type: 'shape', shapeId: PREDEFINED_SHAPES[0].id }, timestamp: Date.now() - 40000 },
-      ]);
-    }
+    // Simulate fetching user data after a short delay
+    const timer = setTimeout(() => {
+      const fetchedUser: User = {
+        id: 'user_placeholder_1',
+        name: 'Demo User',
+        avatarUrl: 'https://picsum.photos/seed/demouser/40/40',
+      };
+      setCurrentUser(fetchedUser);
+      setUsers([fetchedUser]); // Add current user to the list of users
+
+      // Simulate fetching some channels for demo purposes if needed, or leave empty
+      const fetchedChannels: Channel[] = [
+        { id: 'general', name: 'general', type: 'channel', icon: Hash },
+        { id: 'shapes-ai', name: 'shapes-ai-chat', type: 'channel', icon: Bot },
+      ];
+      setChannels(fetchedChannels);
+      if (fetchedChannels.length > 0) {
+        setActiveChannelId(fetchedChannels[0].id);
+         // Optionally, load some placeholder messages for the first channel
+        setMessages([
+          { id: 'welcome_msg', channelId: fetchedChannels[0].id, userId: 'AI_BOT', content: {type: 'text', text: 'Welcome to ShapeTalk! Select a channel or talk to the AI.'}, timestamp: Date.now() }
+        ]);
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
   }, []);
 
 
   const handleSelectChannel = (channelId: string) => {
     setActiveChannelId(channelId);
+    // Potentially clear messages or fetch messages for the new channel here
   };
 
   const handleSendMessage = async (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => {
+    if (!currentUser) {
+      toast({ title: "Authentication Error", description: "You must be logged in to send messages.", variant: "destructive" });
+      return;
+    }
+    if (!channelId) {
+      toast({ title: "Channel Error", description: "No active channel selected to send the message.", variant: "destructive" });
+      return;
+    }
+
     const newMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       channelId,
-      userId: mockCurrentUser.id,
+      userId: currentUser.id,
       content,
       timestamp: Date.now(),
     };
@@ -73,6 +78,10 @@ export default function ShapeTalkPage() {
   };
 
   const handleSendAiResponseMessage = async (channelId: string, aiData: { textResponse: string; prompt: string; sourceShapeId: string }) => {
+     if (!channelId) {
+      toast({ title: "Channel Error", description: "No active channel selected to send the AI response.", variant: "destructive" });
+      return;
+    }
     const newMessage: Message = {
       id: `ai_msg_${Date.now()}`,
       channelId,
@@ -93,7 +102,19 @@ export default function ShapeTalkPage() {
   };
 
   const handleAddChannel = () => {
-    toast({ title: "Add Channel Clicked", description: "Functionality to add a new channel would be here." });
+    // For demonstration, let's add a new channel
+    const newChannelName = prompt("Enter new channel name:");
+    if (newChannelName) {
+      const newChannel: Channel = {
+        id: `channel_${Date.now()}`,
+        name: newChannelName,
+        type: 'channel',
+        icon: Hash,
+      };
+      setChannels(prev => [...prev, newChannel]);
+      setActiveChannelId(newChannel.id);
+      toast({ title: "Channel Added", description: `Channel "${newChannelName}" created.` });
+    }
   };
 
   const activeChannelDetails = [...channels, ...directMessages].find(c => c.id === activeChannelId) || null;
@@ -104,7 +125,7 @@ export default function ShapeTalkPage() {
         <AppSidebar
           channels={channels}
           directMessages={directMessages}
-          currentUser={mockCurrentUser}
+          currentUser={currentUser}
           activeChannelId={activeChannelId}
           onSelectChannel={handleSelectChannel}
           onOpenSettings={handleOpenSettings}
@@ -119,8 +140,8 @@ export default function ShapeTalkPage() {
           <ChatView
             activeChannel={activeChannelDetails}
             messages={messages}
-            currentUser={mockCurrentUser}
-            users={mockUsers}
+            currentUser={currentUser}
+            users={users}
             onSendMessage={handleSendMessage}
             onSendAiResponseMessage={handleSendAiResponseMessage}
           />

@@ -1,20 +1,21 @@
+
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
 import type { Message, User, Channel } from '@/types';
 import { MessageItem } from './message-item';
 import { MessageInput } from './message-input';
-import { AiChatDialog } from '@/components/ai/image-generator-dialog'; // Path remains same, component name inside is AiChatDialog
+import { AiChatDialog } from '@/components/ai/image-generator-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from '@/components/ui/button';
-import { Hash, Users, AtSign, MessageCircle, Sparkles } from 'lucide-react'; // Added MessageCircle, Sparkles
+import { Hash, Users, AtSign, MessageCircle, Sparkles } from 'lucide-react'; 
 
 interface ChatViewProps {
   activeChannel: Channel | null;
   messages: Message[];
-  currentUser: User;
-  users: User[]; // All users, for fetching sender details
+  currentUser: User | null;
+  users: User[]; 
   onSendMessage: (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
   onSendAiResponseMessage: (channelId: string, responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => Promise<void>;
 }
@@ -37,25 +38,44 @@ export function ChatView({
     }
   }, [messages, activeChannel]);
 
+  const handleOpenAiChat = () => {
+    if (!currentUser) {
+      // Optionally, show a toast or alert that user needs to be logged in
+      console.warn("User not logged in. Cannot open AI Chat dialog.");
+      return;
+    }
+    if (!activeChannel) {
+        // If no channel selected, AI chat might be for general purpose or disabled.
+        // For this app, let's assume AI chat should be tied to a channel.
+        // Or, the AI chat dialog could have a mode where it doesn't post to a channel.
+        // For now, we allow opening it but it won't be able to post.
+        console.warn("No active channel for AI Chat. Response won't be posted.");
+    }
+    setIsAiChatDialogOpen(true);
+  };
+
   if (!activeChannel) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background p-4 text-muted-foreground">
         <MessageCircle className="w-16 h-16 mb-4" />
         <h2 className="text-xl font-semibold">Select a channel to start chatting</h2>
         <p className="text-sm">Or talk to our AI about shapes!</p>
-         <Button onClick={() => setIsAiChatDialogOpen(true)} className="mt-4" variant="outline">
+         <Button onClick={handleOpenAiChat} className="mt-4" variant="outline" disabled={!currentUser}>
            <Sparkles className="mr-2 h-4 w-4" /> Chat with AI
          </Button>
          <AiChatDialog 
             isOpen={isAiChatDialogOpen} 
             onOpenChange={setIsAiChatDialogOpen}
             onAiResponse={async (responseData) => {
-              // This case should ideally be prevented by disabling the button if no channel is active.
-              // For now, we'll rely on the dialog itself or the button click handler to manage this.
-              console.warn("AI Response received but no active channel to post to. This should not happen if button is disabled.");
+              // This case is tricky: AI response when no channel is active.
+              // The current onSendAiResponseMessage expects a channelId.
+              // For now, this dialog will be disabled if no activeChannelId for posting.
+              // The button above handles the !currentUser case.
+              // If a channelId is truly null here, it means the logic for opening the dialog needs refinement.
+              console.warn("AI Response received but no active channel to post to. Response not sent.");
             }}
-            currentUserId={currentUser.id}
-            activeChannelId={null} // Pass null if no active channel, dialog should handle this
+            currentUserId={currentUser?.id}
+            activeChannelId={null} // No active channel, so pass null. Dialog should handle.
           />
       </div>
     );
@@ -63,13 +83,15 @@ export function ChatView({
 
   const currentChannelMessages = messages.filter(msg => msg.channelId === activeChannel.id);
 
-  const getUserById = (userId: string): User | { id: 'AI_BOT', name: 'AI Bot', avatarUrl?: string } => {
+  const getUserById = (userId: string): User | { id: 'AI_BOT', name: 'AI Bot', avatarUrl?: string } | { id: string, name: string } => {
     if (userId === 'AI_BOT') return { id: 'AI_BOT', name: 'AI Bot' };
-    return users.find(u => u.id === userId) || { id: 'unknown', name: 'Unknown User' };
+    const foundUser = users.find(u => u.id === userId);
+    if (foundUser) return foundUser;
+    return { id: userId, name: 'Unknown User' };
   };
 
   const getChannelIcon = () => {
-    if (activeChannel.type === 'dm') {
+    if (activeChannel.type === 'dm' && currentUser) { // Check currentUser for DM name processing
       const otherUserName = activeChannel.name.replace(currentUser.name, '').trim();
       const otherUser = users.find(u => u.name === otherUserName);
       if (otherUser) {
@@ -107,7 +129,7 @@ export function ChatView({
                 key={msg.id} 
                 message={msg} 
                 sender={sender}
-                isOwnMessage={msg.userId === currentUser.id} 
+                isOwnMessage={currentUser ? msg.userId === currentUser.id : false} 
               />
             );
           })}
@@ -116,18 +138,24 @@ export function ChatView({
       
       <MessageInput 
         onSendMessage={(content) => onSendMessage(activeChannel.id, content)} 
-        onOpenAiChat={() => setIsAiChatDialogOpen(true)}
-        disabled={!activeChannel}
+        onOpenAiChat={handleOpenAiChat}
+        disabled={!activeChannel || !currentUser} // Disable if no channel or no user
       />
-      {activeChannel && (
-        <AiChatDialog 
-          isOpen={isAiChatDialogOpen} 
-          onOpenChange={setIsAiChatDialogOpen}
-          onAiResponse={(responseData) => onSendAiResponseMessage(activeChannel.id, responseData)}
-          currentUserId={currentUser.id}
-          activeChannelId={activeChannel.id}
-        />
-      )}
+      {/* AiChatDialog is triggered by MessageInput or the placeholder button */}
+      {/* Ensure it gets correct props when activeChannel and currentUser exist */}
+      <AiChatDialog 
+        isOpen={isAiChatDialogOpen} 
+        onOpenChange={setIsAiChatDialogOpen}
+        onAiResponse={(responseData) => {
+            if (activeChannel?.id) {
+                 onSendAiResponseMessage(activeChannel.id, responseData);
+            } else {
+                console.warn("AI Chat dialog: No active channel ID to send response.");
+            }
+        }}
+        currentUserId={currentUser?.id}
+        activeChannelId={activeChannel?.id || null}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
+
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -27,7 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ShapePalette } from '@/components/shape/shape-palette';
 import { useToast } from '@/hooks/use-toast';
-import { MessageSquareText, Loader2, Sparkles } from 'lucide-react'; // Changed Wand2 to Sparkles / MessageSquareText
+import { MessageSquareText, Loader2, Sparkles } from 'lucide-react';
 
 const formSchema = z.object({
   promptText: z.string().min(1, 'Prompt is required.'),
@@ -40,8 +41,8 @@ interface AiChatDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onAiResponse: (responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => void;
-  currentUserId: string;
-  activeChannelId: string | null;
+  currentUserId?: string; // Can be undefined if user is not logged in
+  activeChannelId: string | null; // Can be null if no channel is active for posting
 }
 
 export function AiChatDialog({ 
@@ -62,9 +63,23 @@ export function AiChatDialog({
     },
   });
 
+  // Reset form when dialog closes or relevant IDs change
+  useEffect(() => {
+    if (!isOpen) {
+      form.reset({
+        promptText: '',
+        shapeId: PREDEFINED_SHAPES[0]?.id || '',
+      });
+    }
+  }, [isOpen, form]);
+
   const onSubmit: SubmitHandler<AiChatFormValues> = async (data) => {
     if (!activeChannelId) {
       toast({ title: "Error", description: "No active channel selected to send the AI response.", variant: "destructive" });
+      return;
+    }
+    if (!currentUserId) {
+      toast({ title: "Error", description: "User information is missing. Cannot send AI request.", variant: "destructive" });
       return;
     }
 
@@ -80,8 +95,8 @@ export function AiChatDialog({
       const result = await chatWithShape({
         promptText: data.promptText,
         shapeId: data.shapeId,
-        userId: currentUserId,
-        channelId: activeChannelId,
+        userId: currentUserId, // Ensured to be string by the check above
+        channelId: activeChannelId, // Ensured to be string by the check above
       });
 
       onAiResponse({ 
@@ -90,8 +105,7 @@ export function AiChatDialog({
         sourceShapeId: data.shapeId 
       });
       toast({ title: "Success!", description: "AI response received and added to chat." });
-      onOpenChange(false);
-      form.reset();
+      onOpenChange(false); // This will trigger form.reset() via useEffect
     } catch (error) {
       console.error("Error getting AI response:", error);
       toast({
@@ -104,18 +118,20 @@ export function AiChatDialog({
     }
   };
 
+  const canSubmit = !!activeChannelId && !!currentUserId;
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
       if (!isLoading) {
         onOpenChange(open);
-        if (!open) form.reset();
       }
     }}>
       <DialogContent className="sm:max-w-md bg-card">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><MessageSquareText className="text-primary" /> Chat with AI about a Shape</DialogTitle>
           <DialogDescription>
-            Ask the AI something related to the selected shape or your prompt.
+            Ask the AI something related to the selected shape or your prompt. 
+            {!canSubmit && <span className="text-destructive block mt-1">A user and active channel are required to send.</span>}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -154,7 +170,7 @@ export function AiChatDialog({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading || !activeChannelId}>
+              <Button type="submit" disabled={isLoading || !canSubmit}>
                 {isLoading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (

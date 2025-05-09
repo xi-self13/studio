@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Channel, User } from '@/types';
@@ -16,17 +17,17 @@ import {
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AtSign, Hash, MessageCircle, Settings, Users, Bot, PlusCircle } from 'lucide-react';
+import { AtSign, Hash, MessageCircle, Settings, Users, Bot, PlusCircle, LogIn } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface SidebarNavProps {
   channels: Channel[];
   directMessages: Channel[];
-  currentUser: User;
+  currentUser: User | null;
   activeChannelId: string | null;
   onSelectChannel: (channelId: string) => void;
   onOpenSettings: () => void;
-  onAddChannel: () => void; // placeholder - fixed syntax
+  onAddChannel: () => void;
 }
 
 export function AppSidebar({
@@ -71,13 +72,19 @@ export function AppSidebar({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+               {channels.length === 0 && (
+                <SidebarMenuItem>
+                  <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No channels yet.</span>
+                   <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:[&:not(:hover)]:hidden hidden">No channels.</span>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroup>
 
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
                <span className="flex items-center gap-2"><Users size={16} /> Direct Messages</span>
-                <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => {}} aria-label="New DM">
+                <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => { /* Placeholder for New DM */}} aria-label="New DM">
                   <PlusCircle size={16} />
                 </Button>
             </SidebarGroupLabel>
@@ -98,25 +105,40 @@ export function AppSidebar({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {directMessages.length === 0 && (
+                 <SidebarMenuItem>
+                  <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No DMs yet.</span>
+                  <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:[&:not(:hover)]:hidden hidden">No DMs.</span>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroup>
         </ScrollArea>
       </SidebarContent>
 
       <SidebarFooter className="p-2 mt-auto border-t border-sidebar-border">
-        <div className="flex items-center justify-between p-2 rounded-md hover:bg-sidebar-accent">
-          <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
-            <Avatar className="h-8 w-8">
-              <AvatarImage src={currentUser.avatarUrl} data-ai-hint="user avatar" />
-              <AvatarFallback>{currentUser.name.substring(0, 1).toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <span className="text-sm font-medium text-sidebar-foreground">{currentUser.name}</span>
+        {currentUser ? (
+          <div className="flex items-center justify-between p-2 rounded-md hover:bg-sidebar-accent">
+            <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
+              <Avatar className="h-8 w-8">
+                <AvatarImage src={currentUser.avatarUrl} data-ai-hint="user avatar" />
+                <AvatarFallback>{currentUser.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+              </Avatar>
+              <span className="text-sm font-medium text-sidebar-foreground">{currentUser.name}</span>
+            </div>
+            <Button variant="ghost" size="icon" onClick={onOpenSettings} className="group-data-[collapsible=icon]:w-full">
+                <Settings size={18}/>
+                <span className="sr-only">Settings</span>
+            </Button>
           </div>
-           <Button variant="ghost" size="icon" onClick={onOpenSettings} className="group-data-[collapsible=icon]:w-full">
-              <Settings size={18}/>
-              <span className="sr-only">Settings</span>
-           </Button>
-        </div>
+        ) : (
+          <div className="flex items-center justify-center p-2 group-data-[collapsible=icon]:p-0">
+             <Button variant="ghost" className="w-full group-data-[collapsible=icon]:aspect-square group-data-[collapsible=icon]:p-2" onClick={() => { /* Placeholder for login */ }}>
+                <LogIn size={18}/>
+                <span className="group-data-[collapsible=icon]:hidden ml-2">Login</span>
+             </Button>
+          </div>
+        )}
       </SidebarFooter>
     </Sidebar>
   );
