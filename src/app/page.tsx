@@ -533,25 +533,24 @@ export default function ShapeTalkPage() {
 
       if (currentChannel.botId && currentChannel.botId !== DEFAULT_AI_BOT_USER_ID) {
           const actualBotConfig = userBots.find(b => b.id === currentChannel.botId) || await getBotConfigFromFirestore(currentChannel.botId);
-        if (actualBotConfig && actualBotConfig.apiKey !== '***') { 
+        if (actualBotConfig) { 
           botUserIdToUse = actualBotConfig.id;
-          botApiKeyToUse = actualBotConfig.apiKey; 
+          if (actualBotConfig.apiKey && actualBotConfig.apiKey !== '***') {
+            botApiKeyToUse = actualBotConfig.apiKey; 
+          }
           botShapeUsernameToUse = actualBotConfig.shapeUsername;
           botSystemPrompt = actualBotConfig.systemPrompt;
         } else if (foundBotConfig && foundBotConfig.shapeUsername) { 
             botUserIdToUse = foundBotConfig.id;
             botShapeUsernameToUse = foundBotConfig.shapeUsername;
             botSystemPrompt = (foundBotConfig as BotConfig).systemPrompt || foundBotConfig.description; 
-            if(!botApiKeyToUse && !process.env.SHAPESINC_API_KEY) {
-              sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "This bot's API key is not available for direct chat here, and no default API key is set.", "text");
-              return;
-            }
+             // For public/platform bots, apiKeyToUse remains undefined, relying on chatWithShape's fallback to env var
         }
          else {
           sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the complete configuration for this bot.", "text");
           return;
         }
-      } else { 
+      } else { // Default bot channel
         if (isApiHealthy === false) { 
             sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm having trouble connecting to my services right now. Please try again later.", "text");
             return;
@@ -586,21 +585,16 @@ export default function ShapeTalkPage() {
         sendBotMessageUtil(channelId, botUserIdToUse, `Sorry, I encountered an error: ${(error as Error).message}`, "text");
       }
     } else if (currentChannel && currentChannel.isAiLounge && content.type === 'text') {
-      if (isApiHealthy === false) { 
-          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "The AI Lounge is quiet, core services seem unavailable.", "text");
-          return;
+      if (isApiHealthy === false || isApiHealthy === null || platformAndPublicAis.length === 0) {
+        let loungeMessage = "The AI Lounge is quiet...";
+        if (isApiHealthy === false) loungeMessage = "The AI Lounge is quiet, core services seem unavailable.";
+        else if (isApiHealthy === null) loungeMessage = "Checking AI Lounge connections...";
+        else if (platformAndPublicAis.length === 0) loungeMessage = "No AIs seem to be in the lounge right now.";
+        sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, loungeMessage, "text");
+        return;
       }
-      if (isApiHealthy === null) { 
-          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Checking AI Lounge connections...", "text");
-          return;
-      }
-      if (platformAndPublicAis.length === 0) { 
-          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "No AIs seem to be in the lounge right now.", "text");
-          return;
-      }
-
+      
       const randomPlatformAi = platformAndPublicAis[Math.floor(Math.random() * platformAndPublicAis.length)];
-
       try {
         const contextShapeForLounge = PREDEFINED_SHAPES[0];
         if (!contextShapeForLounge) { 
@@ -621,6 +615,75 @@ export default function ShapeTalkPage() {
          console.error("Error in AI Lounge chat:", error);
          sendBotMessageUtil(channelId, randomPlatformAi.id, `An error occurred in the lounge: ${(error as Error).message}`, "text");
       }
+    } else if (currentChannel && currentChannel.isBotGroup && currentChannel.groupId && content.type === 'text') {
+        if (isApiHealthy === false || isApiHealthy === null) {
+            const healthMessage = isApiHealthy === false ? "Group chat unavailable, core services seem down." : "Checking group chat connections...";
+            sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, healthMessage, "text");
+            return;
+        }
+
+        const groupConfig = botGroups.find(g => g.id === currentChannel.groupId) || await getBotGroupFS(currentChannel.groupId);
+
+        if (!groupConfig || !groupConfig.botIds || groupConfig.botIds.length === 0) {
+            sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "This group doesn't have any bots to respond.", "text");
+            return;
+        }
+
+        // Simple strategy: let the first bot in the group respond.
+        const respondingBotId = groupConfig.botIds[0];
+        let botToRespond: BotConfig | PlatformShape | null = null;
+        let botApiKeyToUse: string | undefined = undefined;
+        let botShapeUsernameToUse: string | undefined = undefined;
+        let botSystemPrompt: string | undefined = undefined;
+
+        botToRespond = userBots.find(b => b.id === respondingBotId) as BotConfig | null;
+        if (!botToRespond) {
+            botToRespond = platformAndPublicAis.find(p => p.id === respondingBotId) as PlatformShape | null;
+        }
+        if (!botToRespond) {
+            botToRespond = await getBotConfigFromFirestore(respondingBotId);
+        }
+
+        if (!botToRespond) {
+            sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, `Configuration for bot ${respondingBotId} in group not found.`, "text");
+            return;
+        }
+
+        botShapeUsernameToUse = botToRespond.shapeUsername;
+        if ('apiKey' in botToRespond && botToRespond.apiKey && botToRespond.apiKey !== '***') {
+            botApiKeyToUse = botToRespond.apiKey;
+        }
+        if ('systemPrompt' in botToRespond && botToRespond.systemPrompt) {
+            botSystemPrompt = botToRespond.systemPrompt;
+        } else if ('description' in botToRespond) { // Fallback for PlatformShape or BotConfig without systemPrompt
+            botSystemPrompt = botToRespond.description;
+        }
+        
+        if (!botShapeUsernameToUse) {
+             sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, `Shape username for ${botToRespond.name} is missing.`, "text");
+             return;
+        }
+
+        try {
+            const contextShapeForGroup = PREDEFINED_SHAPES[0];
+            if (!contextShapeForGroup) {
+                sendBotMessageUtil(channelId, respondingBotId, "Missing core context for group chat.", "text");
+                return;
+            }
+            const aiResponse = await chatWithShape({
+                promptText: content.text,
+                contextShapeId: contextShapeForGroup.id,
+                userId: currentUser.uid,
+                channelId: channelId,
+                botApiKey: botApiKeyToUse,
+                botShapeUsername: botShapeUsernameToUse,
+                systemPrompt: botSystemPrompt,
+            });
+            sendBotMessageUtil(channelId, respondingBotId, aiResponse.responseText, "ai_response", content.text, contextShapeForGroup.id);
+        } catch (error) {
+            console.error(`Error calling Shapes API for bot ${respondingBotId} in group ${groupConfig.name}:`, error);
+            sendBotMessageUtil(channelId, respondingBotId, `Sorry, I encountered an error in the group: ${(error as Error).message}`, "text");
+        }
     }
   };
 
@@ -1055,4 +1118,5 @@ export default function ShapeTalkPage() {
     </SidebarProvider>
   );
 }
+
 
