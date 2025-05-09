@@ -10,21 +10,20 @@ import { Button } from '@/components/ui/button';
 import { PanelLeft } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash, Bot, Users } from 'lucide-react'; // Icons for channels
+import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
+import { PREDEFINED_SHAPES, getShapeById } from '@/lib/shapes';
 
 export default function ShapeTalkPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [directMessages, setDirectMessages] = useState<Channel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(null); // Initialize currentUser as null
-  const [users, setUsers] = useState<User[]>([]); // Initialize users as empty array
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
 
   const { toast } = useToast();
 
-  // Placeholder: In a real app, you would fetch current user, channels, DMs, users, etc.
-  // For now, we can set a mock current user after a delay to simulate login, or leave it null.
   useEffect(() => {
-    // Simulate fetching user data after a short delay
     const timer = setTimeout(() => {
       const fetchedUser: User = {
         id: 'user_placeholder_1',
@@ -32,9 +31,8 @@ export default function ShapeTalkPage() {
         avatarUrl: 'https://picsum.photos/seed/demouser/40/40',
       };
       setCurrentUser(fetchedUser);
-      setUsers([fetchedUser]); // Add current user to the list of users
+      setUsers([fetchedUser]);
 
-      // Simulate fetching some channels for demo purposes if needed, or leave empty
       const fetchedChannels: Channel[] = [
         { id: 'general', name: 'general', type: 'channel', icon: Hash },
         { id: 'shapes-ai', name: 'shapes-ai-chat', type: 'channel', icon: Bot },
@@ -42,10 +40,10 @@ export default function ShapeTalkPage() {
       setChannels(fetchedChannels);
       if (fetchedChannels.length > 0) {
         setActiveChannelId(fetchedChannels[0].id);
-         // Optionally, load some placeholder messages for the first channel
-        setMessages([
-          { id: 'welcome_msg', channelId: fetchedChannels[0].id, userId: 'AI_BOT', content: {type: 'text', text: 'Welcome to ShapeTalk! Select a channel or talk to the AI.'}, timestamp: Date.now() }
-        ]);
+        // Removed initial mock message
+        // setMessages([
+        //   { id: 'welcome_msg', channelId: fetchedChannels[0].id, userId: 'AI_BOT', content: {type: 'text', text: 'Welcome to ShapeTalk! Select a channel or talk to the AI.'}, timestamp: Date.now() }
+        // ]);
       }
     }, 1500);
     return () => clearTimeout(timer);
@@ -68,13 +66,48 @@ export default function ShapeTalkPage() {
     }
 
     const newMessage: Message = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
       userId: currentUser.id,
       content,
       timestamp: Date.now(),
     };
     setMessages(prev => [...prev, newMessage]);
+
+    // Bot response logic
+    const currentChannel = [...channels, ...directMessages].find(c => c.id === channelId);
+    if (currentChannel && currentChannel.icon === Bot && content.type === 'text') {
+      try {
+        // The Shapes API requires a shapeId for context. Use a default one for general bot chat.
+        const defaultShapeForBot = PREDEFINED_SHAPES[0];
+        if (!defaultShapeForBot) {
+          console.error("No predefined shapes available for bot context.");
+          toast({ title: "Bot Error", description: "Bot could not determine a shape context.", variant: "destructive" });
+          return;
+        }
+
+        const aiResponse = await chatWithShape({
+          promptText: content.text,
+          shapeId: defaultShapeForBot.id,
+          userId: currentUser.id, // The user who initiated the interaction with the bot
+          channelId: channelId,   // The channel where the interaction is happening
+        });
+
+        await handleSendAiResponseMessage(channelId, {
+          textResponse: aiResponse.responseText,
+          prompt: content.text,
+          sourceShapeId: defaultShapeForBot.id,
+        });
+
+      } catch (error) {
+        console.error("Error getting AI response for bot chat:", error);
+        toast({
+          title: "AI Bot Error",
+          description: error instanceof Error ? error.message : "The bot encountered an issue and could not respond.",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
   const handleSendAiResponseMessage = async (channelId: string, aiData: { textResponse: string; prompt: string; sourceShapeId: string }) => {
@@ -83,7 +116,7 @@ export default function ShapeTalkPage() {
       return;
     }
     const newMessage: Message = {
-      id: `ai_msg_${Date.now()}`,
+      id: `ai_msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
       userId: 'AI_BOT',
       content: { 
@@ -102,7 +135,6 @@ export default function ShapeTalkPage() {
   };
 
   const handleAddChannel = () => {
-    // For demonstration, let's add a new channel
     const newChannelName = prompt("Enter new channel name:");
     if (newChannelName) {
       const newChannel: Channel = {
