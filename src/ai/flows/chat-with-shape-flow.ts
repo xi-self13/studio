@@ -11,16 +11,15 @@
  * - ChatWithShapeOutput - The return type for the chatWithShape function.
  */
 
-import { z } from 'genkit';
+import { z } from 'genkit'; // z is for zod schema validation
 import { getShapeById } from '@/lib/shapes';
 
 const ChatWithShapeInputSchema = z.object({
   promptText: z.string().describe('The user message to send to the Shape.'),
-  contextShapeId: z.string().describe('The ID of the predefined shape used as context for the conversation.'),
+  contextShapeId: z.string().describe('The ID of the predefined shape used as context for the conversation. (Currently informational for prompt construction, not directly used by Shapes API in a specific field).'),
   userId: z.string().describe('The Firebase UID of the user initiating the chat.'),
   channelId: z.string().describe('The ID of the channel where the chat is happening.'),
-  systemPrompt: z.string().optional().describe('An optional system prompt to guide the bot\'s personality or behavior.'), // New field
-  // Optional: For user-created bots
+  systemPrompt: z.string().optional().describe('An optional system prompt to guide the bot\'s personality or behavior.'),
   botApiKey: z.string().optional().describe('The API key for the specific bot, if not using default.'),
   botShapeUsername: z.string().optional().describe('The Shape username for the specific bot, if not using default.'),
 });
@@ -38,7 +37,8 @@ export async function chatWithShape(
 ): Promise<ChatWithShapeOutput> {
   const parseResult = ChatWithShapeInputSchema.safeParse(input);
   if (!parseResult.success) {
-    throw new Error(`Invalid input: ${parseResult.error.message}`);
+    console.error("ChatWithShapeInput validation error:", parseResult.error.flatten());
+    throw new Error(`Invalid input for chatWithShape: ${parseResult.error.message}`);
   }
 
   const { promptText, contextShapeId, userId, channelId, systemPrompt, botApiKey, botShapeUsername } = input;
@@ -47,6 +47,12 @@ export async function chatWithShape(
   const shapeUsernameToUse = botShapeUsername || process.env.SHAPESINC_SHAPE_USERNAME;
 
   if (!apiKeyToUse || !shapeUsernameToUse) {
+    console.error("Shapes API key or username is not configured.", {
+        botApiKeyProvided: !!botApiKey,
+        botShapeUsernameProvided: !!botShapeUsername,
+        envApiKeyExists: !!process.env.SHAPESINC_API_KEY,
+        envShapeUsernameExists: !!process.env.SHAPESINC_SHAPE_USERNAME
+    });
     throw new Error(
       'Shapes API key or username is not configured. Ensure environment variables are set for the default bot, or credentials are provided for user-created bots.'
     );
@@ -54,30 +60,28 @@ export async function chatWithShape(
 
   const selectedShape = getShapeById(contextShapeId);
   const shapeNameForContext = selectedShape?.name || 'the selected concept';
-
-  // Construct messages array
-  // Shapes API typically uses the last user message. System prompt isn't directly supported via a "system" role in the same way as OpenAI.
-  // Instead, it's usually part of the Shape's configuration on Shapes.inc.
-  // If a systemPrompt is provided here, we might prepend it to the user's message or log a warning that it's not natively used by Shapes API in message array.
-  // For now, we will prepend it to the user message content if provided.
-  // However, the Shapes API documentation states: "System/developer role message - (these are already part of the shape settings)"
-  // "Essentially, we ignore all other messages except the last role=”user” message in the request."
-  // This means sending a separate system message in the array might be ignored.
-  // The best way to use `systemPrompt` with Shapes.inc API, if it's not part of the persisted Shape config,
-  // would be to incorporate its essence into the user's message or rely on the Shape's pre-configuration.
-
-  let userMessageContent = `The user is interacting with the concept of a "${shapeNameForContext}". Their message is: "${promptText}"`;
+  
+  let userMessageContent = promptText;
+  // Prepend system prompt to user message content as Shapes API uses the last user message and has shape settings for system prompts.
   if (systemPrompt) {
-     // Prepending the system prompt to the user's content, as Shapes API focuses on the last user message.
-     // This is a workaround as Shapes API doesn't use a "system" role message in the array.
-    userMessageContent = `${systemPrompt}\n\nRegarding the concept of a "${shapeNameForContext}", the user's message is: "${promptText}"`;
-    // Or, if the API might respect it (though docs say otherwise):
-    // messages.unshift({ role: 'system', content: systemPrompt });
+    userMessageContent = `${systemPrompt}\n\nUser query regarding "${shapeNameForContext}": ${promptText}`;
+  } else {
+    userMessageContent = `User query regarding "${shapeNameForContext}": ${promptText}`;
   }
   
   const messagesPayload = [{ role: 'user', content: userMessageContent }];
 
   try {
+    const requestPayloadLog = {
+        model: `shapesinc/${shapeUsernameToUse}`,
+        userId,
+        channelId,
+        // Do not log messagesPayload directly if it contains sensitive info from systemPrompt or promptText
+        // Or log a truncated/anonymized version if necessary for debugging
+        messageContentLength: userMessageContent.length
+    };
+    // console.log('Requesting Shapes API with payload:', requestPayloadLog);
+
     const response = await fetch('https://api.shapes.inc/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -92,28 +96,57 @@ export async function chatWithShape(
       }),
     });
 
+    const responseBodyText = await response.text(); // Read body once as text for reliable error reporting
+
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('Shapes API Error:', errorBody);
-      throw new Error(
-        `Shapes API request failed with status ${response.status}: ${errorBody}`
-      );
+      console.error('Shapes API Error Details:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: responseBodyText, // Log the full text body of the error
+        requestDetails: requestPayloadLog
+      });
+      
+      let detailedErrorMessage = `Shapes API request failed with status ${response.status}.`;
+      try {
+        const parsedError = JSON.parse(responseBodyText);
+        if (parsedError && parsedError.error && parsedError.error.message) {
+          detailedErrorMessage += ` Message: ${parsedError.error.message}`;
+        } else if (responseBodyText) {
+          detailedErrorMessage += ` Details: ${responseBodyText.substring(0, 300)}`; // Truncate long non-JSON error bodies
+        }
+      } catch (e) {
+        // Response body was not JSON
+        if (responseBodyText) {
+          detailedErrorMessage += ` Details: ${responseBodyText.substring(0, 300)}`;
+        }
+      }
+      throw new Error(detailedErrorMessage);
     }
 
-    const responseData = await response.json();
-    const aiMessage = responseData.choices?.[0]?.message?.content;
+    // If response.ok, try to parse the successful response as JSON
+    try {
+      const responseData = JSON.parse(responseBodyText);
+      const aiMessage = responseData.choices?.[0]?.message?.content;
 
-    if (typeof aiMessage !== 'string') {
-      console.error('Unexpected response structure from Shapes API:', responseData);
-      throw new Error('Failed to extract message from Shapes API response.');
+      if (typeof aiMessage !== 'string') {
+        console.error('Unexpected response structure from Shapes API (choices.message.content not a string):', responseData);
+        throw new Error('Failed to extract message content from Shapes API response. Structure was unexpected.');
+      }
+      return { responseText: aiMessage };
+    } catch (jsonError) {
+      console.error('Error parsing Shapes API JSON response (even though status was ok):', jsonError, { rawBody: responseBodyText });
+      throw new Error(`Failed to parse successful Shapes API response as JSON. Status: ${response.status}. Body (partial): ${responseBodyText.substring(0, 300)}`);
     }
 
-    return { responseText: aiMessage };
   } catch (error) {
-    console.error('Error calling Shapes API:', error);
+    // This catches errors from fetch itself (e.g., network errors) or errors explicitly thrown above
+    console.error('Exception in chatWithShape:', error);
     if (error instanceof Error) {
-      throw error;
+      // Re-throw the existing error object; ensure its message is a string.
+      throw new Error(error.message || 'An unknown error occurred in chatWithShape.');
     }
-    throw new Error('An unknown error occurred while communicating with Shapes API.');
+    // Wrap non-Error objects if any somehow reach here, though less likely with modern JS
+    throw new Error('An unknown error occurred while communicating with the Shapes API.');
   }
 }
+
