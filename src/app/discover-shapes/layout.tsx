@@ -8,11 +8,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { auth } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
-import type { User, Channel, BotConfig } from '@/types';
+import type { User, Channel, BotConfig, BotGroup } from '@/types'; // Added BotGroup
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getUserBotConfigsFromFirestore } from '@/lib/firestoreService';
-import { Bot, Hash, Cpu } from 'lucide-react'; // For channel icons
+import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore } from '@/lib/firestoreService'; // Added getOwnedBotGroupsFromFirestore
+import { Bot, Hash, Cpu, Users2 as BotGroupsIcon } from 'lucide-react'; // Added BotGroupsIcon for consistency
 
 // Define static channels similar to page.tsx for consistency
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
@@ -33,8 +33,10 @@ export default function DiscoverShapesLayout({
 }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userDirectMessages, setUserDirectMessages] = useState<Channel[]>([]);
+  const [userBotGroups, setUserBotGroups] = useState<BotGroup[]>([]); // Added state for bot groups
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingDMs, setIsLoadingDMs] = useState(false);
+  const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false); // Added loading state for bot groups
   const router = useRouter();
 
   const loadUserDMs = useCallback(async (userId: string) => {
@@ -59,6 +61,19 @@ export default function DiscoverShapesLayout({
     }
   }, []);
 
+  const loadUserBotGroups = useCallback(async (userId: string) => { // Added function to load bot groups
+    setIsLoadingBotGroups(true);
+    try {
+      const groups = await getOwnedBotGroupsFromFirestore(userId);
+      setUserBotGroups(groups);
+    } catch (error) {
+      console.error("Failed to load user bot groups for discover page:", error);
+      setUserBotGroups([]); // Set to empty on error
+    } finally {
+      setIsLoadingBotGroups(false);
+    }
+  }, []);
+
   useEffect(() => {
     setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
@@ -71,14 +86,16 @@ export default function DiscoverShapesLayout({
           isBot: false,
         });
         loadUserDMs(firebaseUser.uid);
+        loadUserBotGroups(firebaseUser.uid); // Load bot groups when user is authenticated
       } else {
         setCurrentUser(null);
         setUserDirectMessages([]);
+        setUserBotGroups([]); // Clear bot groups on logout
       }
       setIsLoadingAuth(false);
     });
     return () => unsubscribe();
-  }, [loadUserDMs]); // Removed router from dependencies as loadUserDMs is stable
+  }, [loadUserDMs, loadUserBotGroups]);
 
   if (isLoadingAuth) {
     return (
@@ -95,17 +112,20 @@ export default function DiscoverShapesLayout({
             <AppSidebar
                 channels={staticChannels} 
                 directMessages={userDirectMessages} 
+                botGroups={userBotGroups} // Pass botGroups
                 currentUser={currentUser}
                 activeChannelId={null} 
                 onSelectChannel={() => router.push('/')} 
-                onOpenSettings={() => {/* Might open settings, or be disabled/redirect */}}
+                onOpenAccountSettings={() => {/* Might open settings, or be disabled/redirect to main page settings */}}
                 onAddChannel={() => {/* Might be disabled or redirect */}}
                 onOpenCreateBotDialog={() => {/* Might be disabled or redirect */}}
+                onOpenCreateBotGroupDialog={() => {/* Placeholder or redirect to main page */}} 
+                onOpenManageBotGroupDialog={(groupId: string) => {/* Placeholder or redirect to main page */}} 
                 onLogout={async () => {
                   await auth.signOut();
                   router.push('/'); 
                 }}
-                isLoadingUserBots={isLoadingDMs} 
+                isLoadingUserBots={isLoadingDMs || isLoadingBotGroups} 
             />
         )}
         {!currentUser && ( 
