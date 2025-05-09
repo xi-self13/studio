@@ -3,6 +3,7 @@
 
 /**
  * @fileOverview Flow to interact with a Shape using the Shapes.inc API.
+ * Supports both a default bot using environment variables and user-created bots with specific credentials.
  *
  * - chatWithShape - A function that sends a message to a specified Shape and returns its response.
  * - ChatWithShapeInput - The input type for the chatWithShape function.
@@ -14,9 +15,12 @@ import { getShapeById } from '@/lib/shapes';
 
 const ChatWithShapeInputSchema = z.object({
   promptText: z.string().describe('The user message to send to the Shape.'),
-  shapeId: z.string().describe('The ID of the shape the user is referring to.'),
+  contextShapeId: z.string().describe('The ID of the predefined shape used as context for the conversation.'),
   userId: z.string().describe('The ID of the user initiating the chat.'),
   channelId: z.string().describe('The ID of the channel where the chat is happening.'),
+  // Optional: For user-created bots
+  botApiKey: z.string().optional().describe('The API key for the specific bot, if not using default.'),
+  botShapeUsername: z.string().optional().describe('The Shape username for the specific bot, if not using default.'),
 });
 
 export type ChatWithShapeInput = z.infer<typeof ChatWithShapeInputSchema>;
@@ -35,36 +39,36 @@ export async function chatWithShape(
     throw new Error(`Invalid input: ${parseResult.error.message}`);
   }
 
-  const { promptText, shapeId, userId, channelId } = input;
+  const { promptText, contextShapeId, userId, channelId, botApiKey, botShapeUsername } = input;
 
-  const apiKey = process.env.SHAPESINC_API_KEY;
-  const shapeUsername = process.env.SHAPESINC_SHAPE_USERNAME;
+  // Use provided bot credentials or fallback to environment variables for the default bot
+  const apiKeyToUse = botApiKey || process.env.SHAPESINC_API_KEY;
+  const shapeUsernameToUse = botShapeUsername || process.env.SHAPESINC_SHAPE_USERNAME;
 
-  if (!apiKey || !shapeUsername) {
+  if (!apiKeyToUse || !shapeUsernameToUse) {
     throw new Error(
-      'Shapes API key or username is not configured in environment variables.'
+      'Shapes API key or username is not configured. Ensure environment variables are set for the default bot, or credentials are provided for user-created bots.'
     );
   }
 
-  const selectedShape = getShapeById(shapeId);
-  const shapeName = selectedShape?.name || 'the selected shape';
+  const selectedShape = getShapeById(contextShapeId);
+  const shapeNameForContext = selectedShape?.name || 'the selected concept';
 
   // Construct a message that includes context about the shape
-  const userMessageContent = `The user is interacting with the concept of a "${shapeName}". Their message is: "${promptText}"`;
+  const userMessageContent = `The user is interacting with the concept of a "${shapeNameForContext}". Their message is: "${promptText}"`;
 
   try {
     const response = await fetch('https://api.shapes.inc/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKeyToUse}`,
         'Content-Type': 'application/json',
         'X-User-Id': userId,
         'X-Channel-Id': channelId,
       },
       body: JSON.stringify({
-        model: `shapesinc/${shapeUsername}`,
+        model: `shapesinc/${shapeUsernameToUse}`,
         messages: [{ role: 'user', content: userMessageContent }],
-        // Shapes API does not support streaming for now, and other parameters like temperature are handled by Shape settings.
       }),
     });
 
@@ -78,8 +82,6 @@ export async function chatWithShape(
 
     const responseData = await response.json();
     
-    // Assuming the response structure is OpenAI-like:
-    // responseData.choices[0].message.content
     const aiMessage = responseData.choices?.[0]?.message?.content;
 
     if (typeof aiMessage !== 'string') {

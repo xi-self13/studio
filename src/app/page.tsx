@@ -1,20 +1,22 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import type { Channel, Message, User } from '@/types';
+import type { Channel, Message, User, BotConfig } from '@/types';
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { PanelLeft } from 'lucide-react';
+import { PanelLeft, Bot } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
-import { Hash, Bot } from 'lucide-react'; 
+import { Hash } from 'lucide-react'; 
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
 import { PREDEFINED_SHAPES, getShapeById } from '@/lib/shapes';
 import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
+import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
 
-const BOT_CHANNEL_ID = 'shapes-ai';
-const AI_BOT_USER_ID = 'AI_BOT';
+const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // For the default bot using env vars
+const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID for the default bot
 
 export default function ShapeTalkPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -23,17 +25,19 @@ export default function ShapeTalkPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
+  const [userBots, setUserBots] = useState<BotConfig[]>([]); // For user-created bots
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
+  const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
 
 
   const { toast } = useToast();
 
-  const sendBotMessageUtil = useCallback((channelId: string, text: string, type: 'text' | 'ai_response' = 'text', prompt?: string, sourceShapeId?: string) => {
+  const sendBotMessageUtil = useCallback((channelId: string, botUserId: string, text: string, type: 'text' | 'ai_response' = 'text', prompt?: string, sourceShapeId?: string) => {
     const botMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
-      userId: AI_BOT_USER_ID,
+      userId: botUserId,
       content: type === 'ai_response' ? { type, textResponse: text, prompt, sourceShapeId } : { type, text },
       timestamp: Date.now(),
     };
@@ -44,46 +48,54 @@ export default function ShapeTalkPage() {
   useEffect(() => {
     const initializeApp = async () => {
       const fetchedUser: User = {
-        id: `user_${Date.now()}`, // More unique ID
+        id: `user_${Date.now()}`, 
         name: 'Demo User',
         avatarUrl: 'https://picsum.photos/seed/demouser/40/40',
       };
       setCurrentUser(fetchedUser);
-      setUsers([fetchedUser, { id: AI_BOT_USER_ID, name: 'Shape AI', avatarUrl: 'https://picsum.photos/seed/shapeai/40/40' }]);
+      
+      const defaultBotUser: User = { 
+        id: DEFAULT_AI_BOT_USER_ID, 
+        name: 'Shape AI (Default)', 
+        avatarUrl: 'https://picsum.photos/seed/defaultbot/40/40',
+        isBot: true,
+      };
+      setUsers([fetchedUser, defaultBotUser]);
 
       const fetchedChannels: Channel[] = [
         { id: 'general', name: 'general', type: 'channel', icon: Hash },
-        { id: BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot },
+        { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID },
       ];
       setChannels(fetchedChannels);
       if (fetchedChannels.length > 0 && !activeChannelId) {
          setActiveChannelId(fetchedChannels[0].id);
       }
 
-      const healthStatus = await checkShapesApiHealth();
+      const healthStatus = await checkShapesApiHealth(); // Checks default bot API health
       setIsApiHealthy(healthStatus.healthy);
 
       if (!healthStatus.healthy) {
         toast({
-          title: "Shapes API Issue",
-          description: healthStatus.error || "The Shapes API is currently unavailable. Bot functionality will be limited.",
+          title: "Shapes API Issue (Default Bot)",
+          description: healthStatus.error || "The default Shapes AI bot is currently unavailable. Functionality may be limited.",
           variant: "destructive",
-          duration: 10000, // Keep toast longer for important messages
+          duration: 10000,
         });
       }
     };
 
     initializeApp();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // activeChannelId removed as it's set within this effect
+  }, [toast]); 
 
 
   useEffect(() => {
-    if (isApiHealthy && activeChannelId === BOT_CHANNEL_ID && !hasSentInitialBotMessageForChannel[BOT_CHANNEL_ID] && currentUser) {
-      const botMessagesInChannel = messages.filter(msg => msg.channelId === BOT_CHANNEL_ID && msg.userId === AI_BOT_USER_ID);
-      if (botMessagesInChannel.length === 0) { // Only send if bot hasn't spoken in this channel yet
-        sendBotMessageUtil(BOT_CHANNEL_ID, "Hello! I'm the Shape AI, powered by Shapes.inc. How can I help you today?");
-        setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [BOT_CHANNEL_ID]: true }));
+    // Initial message for the default bot channel
+    if (isApiHealthy && activeChannelId === DEFAULT_BOT_CHANNEL_ID && !hasSentInitialBotMessageForChannel[DEFAULT_BOT_CHANNEL_ID] && currentUser) {
+      const botMessagesInChannel = messages.filter(msg => msg.channelId === DEFAULT_BOT_CHANNEL_ID && msg.userId === DEFAULT_AI_BOT_USER_ID);
+      if (botMessagesInChannel.length === 0) { 
+        sendBotMessageUtil(DEFAULT_BOT_CHANNEL_ID, DEFAULT_AI_BOT_USER_ID, "Hello! I'm the default Shape AI, powered by Shapes.inc. How can I help you today?");
+        setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [DEFAULT_BOT_CHANNEL_ID]: true }));
       }
     }
   }, [isApiHealthy, activeChannelId, currentUser, sendBotMessageUtil, hasSentInitialBotMessageForChannel, messages]);
@@ -91,7 +103,6 @@ export default function ShapeTalkPage() {
 
   const handleSelectChannel = (channelId: string) => {
     setActiveChannelId(channelId);
-    // No need to reset hasSentInitialBotMessageForChannel here, initial message logic will re-evaluate
   };
 
   const handleSendMessage = async (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => {
@@ -114,53 +125,85 @@ export default function ShapeTalkPage() {
     setMessages(prev => [...prev, newMessage]);
 
     const currentChannel = [...channels, ...directMessages].find(c => c.id === channelId);
-    if (currentChannel && currentChannel.id === BOT_CHANNEL_ID && content.type === 'text') {
-      if (!isApiHealthy) {
-        sendBotMessageUtil(channelId, "I'm currently unable to connect to my services. Please check the API status or try again later.", "text");
-        return;
+    
+    if (currentChannel && currentChannel.isBotChannel && content.type === 'text') {
+      let botUserIdToUse = DEFAULT_AI_BOT_USER_ID;
+      let botApiKeyToUse: string | undefined = undefined;
+      let botShapeUsernameToUse: string | undefined = undefined;
+
+      if (currentChannel.botId && currentChannel.botId !== DEFAULT_AI_BOT_USER_ID) {
+        // This is a user-created bot
+        const userBotConfig = userBots.find(b => b.id === currentChannel.botId);
+        if (userBotConfig) {
+          botUserIdToUse = userBotConfig.id;
+          botApiKeyToUse = userBotConfig.apiKey; // SECURITY_RISK: Handled here for demo
+          botShapeUsernameToUse = userBotConfig.shapeUsername;
+        } else {
+          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the configuration for this bot.", "text");
+          return;
+        }
+      } else {
+        // Default bot channel, check general API health
+        if (!isApiHealthy) {
+          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm currently unable to connect to my services. Please check the API status or try again later.", "text");
+          return;
+        }
       }
+      
       try {
-        // The Shapes API requires a shapeId for context. Use a default one for general bot chat.
-        const defaultShapeForBot = PREDEFINED_SHAPES[0]; 
-        if (!defaultShapeForBot) {
+        const contextShapeForBot = PREDEFINED_SHAPES[0]; 
+        if (!contextShapeForBot) {
           console.error("No predefined shapes available for bot context.");
-          sendBotMessageUtil(channelId, "I'm having trouble finding a default context. Please try asking about a specific shape.", "text");
+          sendBotMessageUtil(channelId, botUserIdToUse, "I'm having trouble finding a default context. Please try asking about a specific shape.", "text");
           return;
         }
 
         const aiResponse = await chatWithShape({
           promptText: content.text,
-          shapeId: defaultShapeForBot.id, // API flow requires shapeId
+          contextShapeId: contextShapeForBot.id, 
           userId: currentUser.id, 
-          channelId: channelId,   
+          channelId: channelId,
+          botApiKey: botApiKeyToUse,
+          botShapeUsername: botShapeUsernameToUse,   
         });
         
-        sendBotMessageUtil(channelId, aiResponse.responseText, "ai_response", content.text, defaultShapeForBot.id);
+        sendBotMessageUtil(channelId, botUserIdToUse, aiResponse.responseText, "ai_response", content.text, contextShapeForBot.id);
 
       } catch (error) {
-        console.error("Error getting AI response for bot chat:", error);
+        console.error(`Error getting AI response for ${botShapeUsernameToUse || 'default'} bot:`, error);
         const errorMessage = error instanceof Error ? error.message : "The bot encountered an issue and could not respond.";
         toast({
           title: "AI Bot Error",
           description: errorMessage,
           variant: "destructive",
         });
-        sendBotMessageUtil(channelId, `Sorry, I couldn't process that: ${errorMessage}`, "text");
+        sendBotMessageUtil(channelId, botUserIdToUse, `Sorry, I couldn't process that: ${errorMessage}`, "text");
       }
     }
   };
   
-  const handleSendAiResponseMessage = async (channelId: string, aiData: { textResponse: string; prompt: string; sourceShapeId: string }) => {
-     if (!channelId) {
+  const handleSendAiResponseMessage = async (
+    channelId: string, 
+    aiData: { textResponse: string; prompt: string; sourceShapeId: string }
+  ) => {
+    if (!channelId) {
       toast({ title: "Channel Error", description: "No active channel selected to send the AI response.", variant: "destructive" });
       return;
     }
-    if (!isApiHealthy && channelId === BOT_CHANNEL_ID) {
-      sendBotMessageUtil(channelId, "My services are currently unavailable. Please try again later.", "text");
-      // Still show the user's prompt in the dialog if it fails? For now, just a general message.
-      return;
+
+    const currentChannel = [...channels, ...directMessages].find(c => c.id === channelId);
+    let botUserIdToUse = DEFAULT_AI_BOT_USER_ID;
+
+    if (currentChannel?.isBotChannel && currentChannel.botId) {
+        botUserIdToUse = currentChannel.botId;
+         if (currentChannel.botId === DEFAULT_AI_BOT_USER_ID && !isApiHealthy) {
+             sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "My services are currently unavailable. Please try again later.", "text");
+             return;
+         }
     }
-    sendBotMessageUtil(channelId, aiData.textResponse, "ai_response", aiData.prompt, aiData.sourceShapeId);
+    // For user-created bots, health is implicitly checked by the API call succeeding or failing.
+
+    sendBotMessageUtil(channelId, botUserIdToUse, aiData.textResponse, "ai_response", aiData.prompt, aiData.sourceShapeId);
   };
   
   const handleOpenSettings = () => {
@@ -182,6 +225,36 @@ export default function ShapeTalkPage() {
     }
   };
 
+  const handleAddBot = (botConfig: BotConfig) => {
+    if (!currentUser) return; // Should not happen if dialog is only shown to logged-in users
+
+    // Add to userBots state
+    setUserBots(prev => [...prev, botConfig]);
+
+    // Add bot as a "user" for chat display
+    const botUser: User = {
+      id: botConfig.id,
+      name: botConfig.name,
+      avatarUrl: botConfig.avatarUrl || `https://picsum.photos/seed/${botConfig.id}/40/40`,
+      isBot: true,
+    };
+    setUsers(prev => [...prev, botUser]);
+
+    // Create a new DM channel for this bot
+    const newDmChannel: Channel = {
+      id: `dm_${botConfig.id}_${currentUser.id}`,
+      name: botConfig.name, // DM channel will be named after the bot
+      type: 'dm',
+      members: [currentUser.id, botConfig.id],
+      isBotChannel: true,
+      botId: botConfig.id,
+      icon: Bot, // Use Bot icon for DM with bot
+    };
+    setDirectMessages(prev => [...prev, newDmChannel]);
+    setActiveChannelId(newDmChannel.id); // Optionally switch to new DM
+    toast({ title: "Bot Added", description: `You can now chat with ${botConfig.name}.` });
+  };
+
   const activeChannelDetails = [...channels, ...directMessages].find(c => c.id === activeChannelId) || null;
 
   return (
@@ -195,6 +268,7 @@ export default function ShapeTalkPage() {
           onSelectChannel={handleSelectChannel}
           onOpenSettings={handleOpenSettings}
           onAddChannel={handleAddChannel}
+          onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
         />
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
           <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
@@ -204,7 +278,7 @@ export default function ShapeTalkPage() {
           </div>
           <ChatView
             activeChannel={activeChannelDetails}
-            messages={messages}
+            messages={messages.filter(msg => msg.channelId === activeChannelId)} // Filter messages for current channel
             currentUser={currentUser}
             users={users}
             onSendMessage={handleSendMessage}
@@ -212,6 +286,14 @@ export default function ShapeTalkPage() {
           />
         </SidebarInset>
       </div>
+      {currentUser && (
+        <CreateBotDialog
+          isOpen={isCreateBotDialogOpen}
+          onOpenChange={setIsCreateBotDialogOpen}
+          onBotCreated={handleAddBot}
+          currentUserId={currentUser.id}
+        />
+      )}
     </SidebarProvider>
   );
 }

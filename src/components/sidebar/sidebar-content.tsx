@@ -17,7 +17,7 @@ import {
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AtSign, Hash, MessageCircle, Settings, Users, Bot, PlusCircle, LogIn } from 'lucide-react';
+import { AtSign, Hash, MessageCircle, Settings, Users, Bot, PlusCircle, LogIn, Cpu } from 'lucide-react'; // Added Cpu for Add Bot
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface SidebarNavProps {
@@ -28,6 +28,7 @@ interface SidebarNavProps {
   onSelectChannel: (channelId: string) => void;
   onOpenSettings: () => void;
   onAddChannel: () => void;
+  onOpenCreateBotDialog: () => void; // New prop
 }
 
 export function AppSidebar({
@@ -38,6 +39,7 @@ export function AppSidebar({
   onSelectChannel,
   onOpenSettings,
   onAddChannel,
+  onOpenCreateBotDialog, // New prop
 }: SidebarNavProps) {
 
   return (
@@ -97,10 +99,12 @@ export function AppSidebar({
                     tooltip={dm.name}
                     className="justify-start"
                   >
-                    <Avatar className="h-5 w-5">
-                      <AvatarImage src={`https://picsum.photos/seed/${dm.id}/40/40`} data-ai-hint="profile user" />
-                      <AvatarFallback>{dm.name.substring(0, 1).toUpperCase()}</AvatarFallback>
-                    </Avatar>
+                    {dm.isBotChannel ? <Bot className="h-5 w-5" /> : (
+                       <Avatar className="h-5 w-5">
+                         <AvatarImage src={`https://picsum.photos/seed/${dm.id}/40/40`} data-ai-hint="profile user" />
+                         <AvatarFallback>{dm.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+                       </Avatar>
+                    )}
                     <span>{dm.name}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -113,6 +117,29 @@ export function AppSidebar({
               )}
             </SidebarMenu>
           </SidebarGroup>
+
+           {/* Add Bot Section - only if user is logged in */}
+          {currentUser && (
+            <SidebarGroup>
+              <SidebarGroupLabel className="flex items-center justify-between">
+                <span className="flex items-center gap-2"><Cpu size={16} /> My Bots</span>
+                <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={onOpenCreateBotDialog} aria-label="Add New Bot">
+                  <PlusCircle size={16} />
+                </Button>
+              </SidebarGroupLabel>
+              <SidebarMenu>
+                {/* Placeholder if no bots, or could list user's bots here if not handled by DMs */}
+                 <SidebarMenuItem>
+                    <SidebarMenuButton onClick={onOpenCreateBotDialog} tooltip="Create a new AI Bot" className="justify-start group-data-[collapsible=icon]:justify-center">
+                        <Cpu />
+                        <span className="group-data-[collapsible=icon]:hidden">Add New Bot</span>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroup>
+          )}
+
+
         </ScrollArea>
       </SidebarContent>
 

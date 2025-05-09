@@ -1,3 +1,4 @@
+
 "use client";
 
 import type { Message, User } from '@/types';
@@ -11,20 +12,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 interface MessageItemProps {
   message: Message;
-  sender: User | { id: 'AI_BOT', name: 'AI Bot', avatarUrl?: string };
+  sender: User | { id: string, name: string, avatarUrl?: string, isBot?: boolean }; // Allow sender to be a general user object which might be a bot
   isOwnMessage: boolean;
 }
 
 export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps) {
   const getSenderName = () => {
-    if (sender.id === 'AI_BOT') return 'AI Bot';
     return sender.name;
   }
 
   const getAvatar = () => {
-    if (sender.id === 'AI_BOT') {
+    if (sender.isBot) { // Check if the sender is a bot
       return (
         <Avatar className="h-10 w-10 bg-primary/20">
+          {sender.avatarUrl ? (
+            <AvatarImage src={sender.avatarUrl} data-ai-hint="bot avatar" />
+          ) : null}
           <AvatarFallback><Bot className="text-primary" /></AvatarFallback>
         </Avatar>
       );
@@ -73,6 +76,9 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
                     You asked about "{message.content.prompt}"
                     {message.content.sourceShapeId && ` regarding the ${getShapeById(message.content.sourceShapeId)?.name || 'shape'}.`}
                   </CardDescription>
+                )}
+                 {!message.content.prompt && sender.isBot && (
+                  <CardTitle className="text-sm font-medium text-card-foreground">AI Response</CardTitle>
                 )}
               </CardHeader>
               <CardContent className="px-4 pb-3 space-y-2">

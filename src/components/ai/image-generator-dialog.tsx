@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect } from 'react';
@@ -23,15 +24,19 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ui/input'; // Input is not used here, but Textarea is.
 import { Textarea } from '@/components/ui/textarea';
 import { ShapePalette } from '@/components/shape/shape-palette';
 import { useToast } from '@/hooks/use-toast';
 import { MessageSquareText, Loader2, Sparkles } from 'lucide-react';
 
+// This dialog is for "Chat with AI about a specific PREDEFINED_SHAPE"
+// It will use the active bot (either default or user-created if in DM)
+// The `contextShapeId` here is the shape being discussed.
+
 const formSchema = z.object({
   promptText: z.string().min(1, 'Prompt is required.'),
-  shapeId: z.string().min(1, 'Please select a shape to discuss.'),
+  contextShapeId: z.string().min(1, 'Please select a shape to discuss.'), // Renamed from shapeId
 });
 
 type AiChatFormValues = z.infer<typeof formSchema>;
@@ -41,9 +46,11 @@ interface AiChatDialogProps {
   onOpenChange: (isOpen: boolean) => void;
   onAiResponse: (responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => void;
   currentUserId?: string; 
-  activeChannelId: string | null;
-  // Optional: Pass API health status if dialog needs to behave differently
-  // isApiHealthy?: boolean | null; 
+  activeChannelId: string | null; 
+  // For user-created bots, these would be passed if the dialog needs to target a specific bot
+  // However, for this dialog, it uses the bot associated with activeChannelId (handled in page.tsx)
+  // botApiKey?: string; 
+  // botShapeUsername?: string;
 }
 
 export function AiChatDialog({ 
@@ -52,7 +59,6 @@ export function AiChatDialog({
   onAiResponse,
   currentUserId,
   activeChannelId,
-  // isApiHealthy 
 }: AiChatDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
@@ -61,7 +67,7 @@ export function AiChatDialog({
     resolver: zodResolver(formSchema),
     defaultValues: {
       promptText: '',
-      shapeId: PREDEFINED_SHAPES[0]?.id || '',
+      contextShapeId: PREDEFINED_SHAPES[0]?.id || '',
     },
   });
 
@@ -69,48 +75,45 @@ export function AiChatDialog({
     if (!isOpen) {
       form.reset({
         promptText: '',
-        shapeId: PREDEFINED_SHAPES[0]?.id || '',
+        contextShapeId: PREDEFINED_SHAPES[0]?.id || '',
       });
     }
   }, [isOpen, form]);
 
   const onSubmit: SubmitHandler<AiChatFormValues> = async (data) => {
     if (!activeChannelId) {
-      toast({ title: "Error", description: "No active channel selected to send the AI response.", variant: "destructive" });
+      toast({ title: "Error", description: "No active channel selected.", variant: "destructive" });
       return;
     }
     if (!currentUserId) {
-      toast({ title: "Error", description: "User information is missing. Cannot send AI request.", variant: "destructive" });
+      toast({ title: "Error", description: "User information is missing.", variant: "destructive" });
       return;
     }
 
-    // Optional: Check isApiHealthy if it were passed and activeChannelId is the bot channel
-    // if (activeChannelId === 'shapes-ai' && isApiHealthy === false) {
-    //   toast({ title: "API Unhealthy", description: "The AI service is currently unavailable.", variant: "destructive" });
-    //   setIsLoading(false);
-    //   return;
-    // }
-
     setIsLoading(true);
     try {
-      const selectedShape = getShapeById(data.shapeId);
-      if (!selectedShape) {
-        toast({ title: "Error", description: "Invalid shape selected.", variant: "destructive" });
+      const selectedShapeForContext = getShapeById(data.contextShapeId);
+      if (!selectedShapeForContext) {
+        toast({ title: "Error", description: "Invalid shape selected for context.", variant: "destructive" });
         setIsLoading(false);
         return;
       }
       
+      // The `chatWithShape` flow will determine which bot to use (default or user-bot based on activeChannelId)
+      // by page.tsx passing the appropriate apiKey and shapeUsername if it's a user-bot.
+      // This dialog doesn't need to know the bot's specific credentials, only the context shape.
       const result = await chatWithShape({
         promptText: data.promptText,
-        shapeId: data.shapeId,
+        contextShapeId: data.contextShapeId, // This is the shape being discussed
         userId: currentUserId, 
-        channelId: activeChannelId, 
+        channelId: activeChannelId,
+        // botApiKey and botShapeUsername are implicitly handled by the caller in page.tsx based on activeChannelId
       });
 
       onAiResponse({ 
         textResponse: result.responseText, 
         prompt: data.promptText, 
-        sourceShapeId: data.shapeId 
+        sourceShapeId: data.contextShapeId // This is the shape the prompt was about
       });
       toast({ title: "Success!", description: "AI response received and added to chat." });
       onOpenChange(false);
@@ -127,11 +130,11 @@ export function AiChatDialog({
     }
   };
 
-  const canSubmit = !!activeChannelId && !!currentUserId; // Basic check
+  const canSubmit = !!activeChannelId && !!currentUserId;
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
-      if (!isLoading) { // Prevent closing while loading
+      if (!isLoading) { 
         onOpenChange(open);
       }
     }}>
@@ -139,13 +142,8 @@ export function AiChatDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><MessageSquareText className="text-primary" /> Chat with AI about a Shape</DialogTitle>
           <DialogDescription>
-            Ask the AI something related to the selected shape. Your message will be posted to the current channel.
+            Ask the AI something related to the selected shape. Your message and the AI's response will be posted to the current channel.
             {!canSubmit && <span className="text-destructive block mt-1">A user and active channel are required.</span>}
-            {/* Optional: Display API status if relevant for this dialog's context
-            {activeChannelId === 'shapes-ai' && isApiHealthy === false && (
-              <span className="text-destructive block mt-1">AI services are currently unavailable.</span>
-            )}
-            */}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -165,10 +163,10 @@ export function AiChatDialog({
             />
             <FormField
               control={form.control}
-              name="shapeId"
+              name="contextShapeId" // Renamed from shapeId
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Discuss this Shape</FormLabel>
+                  <FormLabel>Discuss this Shape (Context)</FormLabel>
                   <FormControl>
                     <ShapePalette 
                       onSelectShape={(shape) => field.onChange(shape.id)}
@@ -184,7 +182,7 @@ export function AiChatDialog({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={isLoading || !canSubmit /* || (activeChannelId === 'shapes-ai' && isApiHealthy === false) */}>
+              <Button type="submit" disabled={isLoading || !canSubmit}>
                 {isLoading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
