@@ -42,6 +42,7 @@ export interface Channel {
   icon?: React.ElementType; 
   isBotChannel?: boolean; 
   botId?: string; 
+  isAiLounge?: boolean; // New flag for AI Lounge channel
 }
 
 // Configuration for a user-created bot
@@ -52,4 +53,15 @@ export interface BotConfig {
   apiKey: string; 
   avatarUrl?: string;
   ownerUserId: string; // Firebase UID of the user who created this bot
+}
+
+// Configuration for a platform-available AI model/shape
+export interface PlatformShape {
+  id: string; // Unique ID for this platform shape entry (e.g., 'platform-genius-bot')
+  name: string; // Display name (e.g., "Genius Bot")
+  description: string;
+  avatarUrl?: string;
+  dataAiHint?: string;
+  shapeUsername: string; // The specific Shapes.inc username for this model
+  tags?: string[];
 }

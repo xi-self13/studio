@@ -13,14 +13,15 @@ import {
   SidebarMenuItem,
   SidebarFooter,
   SidebarTrigger, 
-  SidebarMenuSkeleton, // Import skeleton
+  SidebarMenuSkeleton, 
 } from '@/components/ui/sidebar';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AtSign, Hash, Settings, Users, Bot, PlusCircle, Cpu, LogOut } from 'lucide-react'; 
+import { AtSign, Hash, Settings, Users, Bot, PlusCircle, Cpu, LogOut, Compass } from 'lucide-react'; // Added Compass
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import Link from 'next/link';
 
 
 interface SidebarNavProps {
@@ -33,7 +34,7 @@ interface SidebarNavProps {
   onAddChannel: () => void;
   onOpenCreateBotDialog: () => void;
   onLogout: () => void; 
-  isLoadingUserBots?: boolean; // Added prop
+  isLoadingUserBots?: boolean;
 }
 
 export function AppSidebar({
@@ -46,11 +47,11 @@ export function AppSidebar({
   onAddChannel,
   onOpenCreateBotDialog,
   onLogout, 
-  isLoadingUserBots = false, // Default to false
+  isLoadingUserBots = false, 
 }: SidebarNavProps) {
 
   return (
-    <Sidebar collapsible="none" variant="sidebar" side="left" className="border-r border-sidebar-border">
+    <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r border-sidebar-border" defaultOpen={true}>
       <SidebarHeader className="p-4 items-center">
         <div className="flex items-center gap-2">
           <ShapeTalkLogo className="w-8 h-8 text-primary" />
@@ -60,6 +61,31 @@ export function AppSidebar({
 
       <SidebarContent asChild>
         <ScrollArea className="h-full">
+          <SidebarGroup>
+            <SidebarGroupLabel className="flex items-center justify-between">
+              <span className="flex items-center gap-2"><Compass size={16} /> Discover</span>
+            </SidebarGroupLabel>
+            <SidebarMenu>
+               <SidebarMenuItem>
+                <Link href="/discover-shapes" passHref legacyBehavior>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip="Discover AI Shapes"
+                    className="justify-start"
+                    disabled={!currentUser}
+                    isActive={false} // Determine active state based on Next.js router if needed
+                  >
+                    <a>
+                      <Compass />
+                      <span>Platform Shapes</span>
+                    </a>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+
+
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
               <span className="flex items-center gap-2"><Hash size={16} /> Channels</span>

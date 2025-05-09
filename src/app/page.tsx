@@ -2,29 +2,30 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import type { Channel, Message, User, BotConfig } from '@/types';
+import type { Channel, Message, User, BotConfig, PlatformShape } from '@/types';
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PanelLeft, Bot, LogIn, LogOut, Mail, KeyRound, UserPlus } from 'lucide-react';
+import { PanelLeft, Bot, LogIn, LogOut, Mail, KeyRound, UserPlus, Cpu, Shapes } from 'lucide-react'; // Added Cpu, Shapes
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react'; 
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
 import { PREDEFINED_SHAPES } from '@/lib/shapes';
 import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
-import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog'; // Added
+import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { Separator } from '@/components/ui/separator';
-import { getUserBotConfigsFromFirestore } from '@/lib/firestoreService'; 
+import { getUserBotConfigsFromFirestore, getPlatformShapesFromFirestore, seedPlatformShapes } from '@/lib/firestoreService'; 
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; 
+const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global';
 
 export default function ShapeTalkPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -34,12 +35,15 @@ export default function ShapeTalkPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]); 
   const [userBots, setUserBots] = useState<BotConfig[]>([]); 
+  const [platformAis, setPlatformAis] = useState<PlatformShape[]>([]); // New state for platform AIs
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
   const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
-  const [isAccountSettingsDialogOpen, setIsAccountSettingsDialogOpen] = useState(false); // Added
+  const [isAccountSettingsDialogOpen, setIsAccountSettingsDialogOpen] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingUserBots, setIsLoadingUserBots] = useState(false);
+  const [isLoadingPlatformAis, setIsLoadingPlatformAis] = useState(false);
+
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -57,6 +61,38 @@ export default function ShapeTalkPage() {
     };
     setMessages(prev => [...prev, botMessage]);
   }, []);
+
+  const loadPlatformAis = useCallback(async () => {
+    setIsLoadingPlatformAis(true);
+    try {
+      const fetchedPlatformAis = await getPlatformShapesFromFirestore();
+      // await seedPlatformShapes(); // DEV ONLY: Call seeder if needed
+      // const fetchedPlatformAis = await getPlatformShapesFromFirestore(); // Fetch again after seeding
+
+      setPlatformAis(fetchedPlatformAis);
+
+      const platformAiUsers: User[] = fetchedPlatformAis.map(pa => ({
+        uid: pa.id,
+        name: pa.name,
+        avatarUrl: pa.avatarUrl,
+        dataAiHint: pa.dataAiHint || 'AI avatar',
+        isBot: true,
+      }));
+      
+      setUsers(prevUsers => {
+        const existingIds = new Set(prevUsers.map(u => u.uid));
+        const newPlatformUsers = platformAiUsers.filter(pu => !existingIds.has(pu.uid));
+        return [...prevUsers, ...newPlatformUsers];
+      });
+
+    } catch (error) {
+      console.error("Failed to load platform AIs:", error);
+      toast({ title: "Error Loading Platform AIs", description: "Could not fetch platform AI configurations.", variant: "destructive" });
+    } finally {
+      setIsLoadingPlatformAis(false);
+    }
+  }, [toast]);
+
 
   useEffect(() => {
     const defaultBotUser: User = { 
@@ -77,6 +113,7 @@ export default function ShapeTalkPage() {
     const fetchedChannels: Channel[] = [
       { id: 'general', name: 'general', type: 'channel', icon: Hash },
       { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID },
+      { id: AI_LOUNGE_CHANNEL_ID, name: 'AI Lounge', type: 'channel', icon: Cpu, isAiLounge: true },
     ];
     setChannels(fetchedChannels);
 
@@ -93,7 +130,8 @@ export default function ShapeTalkPage() {
       }
     };
     checkApi();
-  }, [toast]);
+    loadPlatformAis(); // Load platform AIs on initial setup
+  }, [toast, loadPlatformAis]);
 
   const loadUserBots = useCallback(async (userId: string) => {
     setIsLoadingUserBots(true);
@@ -120,8 +158,10 @@ export default function ShapeTalkPage() {
       }));
       
       setUsers(prevUsers => {
-        const nonUserBots = prevUsers.filter(u => !u.isBot || u.uid === DEFAULT_AI_BOT_USER_ID); 
-        return [...nonUserBots, ...botUsers.filter(bu => !nonUserBots.find(u => u.uid === bu.uid))];
+        const nonUserBots = prevUsers.filter(u => !u.isBot || u.uid === DEFAULT_AI_BOT_USER_ID || platformAis.some(pa => pa.id === u.uid)); 
+        const existingIds = new Set(nonUserBots.map(u => u.uid));
+        const newBotUsers = botUsers.filter(bu => !existingIds.has(bu.uid));
+        return [...nonUserBots, ...newBotUsers];
       });
       setDirectMessages(prevDms => {
         const existingUserDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId)));
@@ -134,7 +174,7 @@ export default function ShapeTalkPage() {
     } finally {
       setIsLoadingUserBots(false);
     }
-  }, [toast]);
+  }, [toast, platformAis]);
 
   useEffect(() => {
     setIsLoadingAuth(true);
@@ -150,11 +190,12 @@ export default function ShapeTalkPage() {
         };
         setCurrentUser(appUser);
         setUsers(prevUsers => {
-          const existingUser = prevUsers.find(u => u.uid === appUser.uid);
+          const baseUsers = prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID || platformAis.some(pa => pa.id === u.uid) || (u.isBot && !userBots.some(ub => ub.id === u.uid))); // Keep default bot, platform AIs, and non-user-bots
+          const existingUser = baseUsers.find(u => u.uid === appUser.uid);
           if (existingUser) {
-            return prevUsers.map(u => u.uid === appUser.uid ? appUser : u);
+            return baseUsers.map(u => u.uid === appUser.uid ? appUser : u);
           }
-          return [...prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID || !u.isBot), appUser];
+          return [...baseUsers, appUser];
         });
         
         loadUserBots(firebaseUser.uid); 
@@ -165,14 +206,14 @@ export default function ShapeTalkPage() {
         setAuthError(null);
       } else {
         setCurrentUser(null);
-        setUsers(prevUsers => prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID)); 
+         setUsers(prevUsers => prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID || platformAis.some(pa => pa.id === u.uid))); 
         setUserBots([]); 
         setDirectMessages([]); 
         setActiveChannelId(null); 
       }
     });
     return () => unsubscribe();
-  }, [activeChannelId, channels, loadUserBots]);
+  }, [activeChannelId, channels, loadUserBots, platformAis]);
 
   const handleFirebaseAuthError = (error: any, actionType: "Login" | "Sign Up") => {
     console.error(`${actionType} error:`, error);
@@ -375,6 +416,51 @@ export default function ShapeTalkPage() {
         });
         sendBotMessageUtil(channelId, botUserIdToUse, `Sorry, I couldn't process that: ${errorMessage}`, "text");
       }
+    } else if (currentChannel && currentChannel.isAiLounge && content.type === 'text') {
+      // Human sent a message in AI Lounge
+      if (!isApiHealthy) {
+        sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "The Shapes API seems to be down. AI Lounge is temporarily paused.", "text");
+        return;
+      }
+      if (platformAis.length === 0) {
+        sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "There are no platform AIs available to chat in the lounge right now.", "text");
+        return;
+      }
+
+      // Pick a random Platform AI to respond
+      const randomPlatformAi = platformAis[Math.floor(Math.random() * platformAis.length)];
+      
+      try {
+        const contextShapeForLounge = PREDEFINED_SHAPES[0]; // Or null/undefined if context not needed
+        if (!contextShapeForLounge) {
+          console.error("No predefined shapes available for AI lounge context.");
+          sendBotMessageUtil(channelId, randomPlatformAi.id, "I'm having trouble finding a default context for the lounge.", "text");
+          return;
+        }
+
+        const aiResponse = await chatWithShape({
+          promptText: content.text,
+          contextShapeId: contextShapeForLounge.id,
+          userId: currentUser.uid, // The human user initiated this chain
+          channelId: channelId,
+          botShapeUsername: randomPlatformAi.shapeUsername, // Target this specific platform AI
+          // botApiKey: undefined, // Uses global API key
+        });
+
+        // The Platform AI (randomPlatformAi.id) sends the message
+        sendBotMessageUtil(channelId, randomPlatformAi.id, aiResponse.responseText, "ai_response", content.text, contextShapeForLounge.id);
+
+      } catch (error) {
+        console.error(`Error getting AI response for Platform AI ${randomPlatformAi.name} in AI Lounge:`, error);
+        const errorMessage = error instanceof Error ? error.message : "An AI in the lounge encountered an issue.";
+        toast({
+          title: "AI Lounge Error",
+          description: errorMessage,
+          variant: "destructive",
+        });
+        // Send error message as the specific AI that failed, or as a generic system message
+        sendBotMessageUtil(channelId, randomPlatformAi.id, `Sorry, I ( ${randomPlatformAi.name} ) couldn't process that: ${errorMessage}`, "text");
+      }
     }
   };
   
@@ -400,7 +486,19 @@ export default function ShapeTalkPage() {
              sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "My services are currently unavailable. Please try again later.", "text");
              return;
          }
+    } else if (currentChannel?.isAiLounge) {
+      // If it's an AI response in the AI lounge, it's likely from one of the platform AIs.
+      // The original prompt might have come from the user, but the response is from an AI.
+      // For simplicity, the AI chat dialog doesn't post directly to AI lounge yet.
+      // This function is primarily for the AI Chat Dialog which posts to bot channels.
+      // If AI chat dialog could target AI lounge, we'd need to pick an AI to "say" this.
+      // For now, let's assume AI Chat Dialog responses go to the current bot, not lounge.
+      // So, we use DEFAULT_AI_BOT_USER_ID or the specific botId of the channel.
+       if (platformAis.length > 0) {
+         botUserIdToUse = platformAis[0].id; // Default to first platform AI if in lounge, needs better logic
+       }
     }
+
 
     sendBotMessageUtil(channelId, botUserIdToUse, aiData.textResponse, "ai_response", aiData.prompt, aiData.sourceShapeId);
   };
@@ -410,7 +508,7 @@ export default function ShapeTalkPage() {
         toast({title: "Login Required", description: "Please login to access settings.", variant: "destructive"});
         return;
     }
-    setIsAccountSettingsDialogOpen(true); // Open account settings dialog
+    setIsAccountSettingsDialogOpen(true);
   };
 
   const handleAccountUpdate = (updatedUser: User) => {
@@ -472,7 +570,7 @@ export default function ShapeTalkPage() {
 
   const activeChannelDetails = currentUser ? [...channels, ...directMessages].find(c => c.id === activeChannelId) || null : null;
 
-  if (isLoadingAuth && !currentUser) { 
+  if ((isLoadingAuth || isLoadingPlatformAis) && !currentUser) { 
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground">
         <ShapeTalkLogo className="w-24 h-24 text-primary mb-6 animate-pulse" />
