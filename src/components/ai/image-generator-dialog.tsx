@@ -24,19 +24,14 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input'; // Input is not used here, but Textarea is.
 import { Textarea } from '@/components/ui/textarea';
 import { ShapePalette } from '@/components/shape/shape-palette';
 import { useToast } from '@/hooks/use-toast';
 import { MessageSquareText, Loader2, Sparkles } from 'lucide-react';
 
-// This dialog is for "Chat with AI about a specific PREDEFINED_SHAPE"
-// It will use the active bot (either default or user-created if in DM)
-// The `contextShapeId` here is the shape being discussed.
-
 const formSchema = z.object({
   promptText: z.string().min(1, 'Prompt is required.'),
-  contextShapeId: z.string().min(1, 'Please select a shape to discuss.'), // Renamed from shapeId
+  contextShapeId: z.string().min(1, 'Please select a shape to discuss.'),
 });
 
 type AiChatFormValues = z.infer<typeof formSchema>;
@@ -45,19 +40,15 @@ interface AiChatDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onAiResponse: (responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => void;
-  currentUserId?: string; 
+  currentUserId?: string | null; // Firebase UID
   activeChannelId: string | null; 
-  // For user-created bots, these would be passed if the dialog needs to target a specific bot
-  // However, for this dialog, it uses the bot associated with activeChannelId (handled in page.tsx)
-  // botApiKey?: string; 
-  // botShapeUsername?: string;
 }
 
 export function AiChatDialog({ 
   isOpen, 
   onOpenChange, 
   onAiResponse,
-  currentUserId,
+  currentUserId, // This is the Firebase UID
   activeChannelId,
 }: AiChatDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
@@ -85,8 +76,8 @@ export function AiChatDialog({
       toast({ title: "Error", description: "No active channel selected.", variant: "destructive" });
       return;
     }
-    if (!currentUserId) {
-      toast({ title: "Error", description: "User information is missing.", variant: "destructive" });
+    if (!currentUserId) { 
+      toast({ title: "Error", description: "User information is missing. Please ensure you are logged in.", variant: "destructive" });
       return;
     }
 
@@ -99,21 +90,17 @@ export function AiChatDialog({
         return;
       }
       
-      // The `chatWithShape` flow will determine which bot to use (default or user-bot based on activeChannelId)
-      // by page.tsx passing the appropriate apiKey and shapeUsername if it's a user-bot.
-      // This dialog doesn't need to know the bot's specific credentials, only the context shape.
       const result = await chatWithShape({
         promptText: data.promptText,
-        contextShapeId: data.contextShapeId, // This is the shape being discussed
-        userId: currentUserId, 
+        contextShapeId: data.contextShapeId,
+        userId: currentUserId, // Pass Firebase UID
         channelId: activeChannelId,
-        // botApiKey and botShapeUsername are implicitly handled by the caller in page.tsx based on activeChannelId
       });
 
       onAiResponse({ 
         textResponse: result.responseText, 
         prompt: data.promptText, 
-        sourceShapeId: data.contextShapeId // This is the shape the prompt was about
+        sourceShapeId: data.contextShapeId 
       });
       toast({ title: "Success!", description: "AI response received and added to chat." });
       onOpenChange(false);
@@ -143,7 +130,7 @@ export function AiChatDialog({
           <DialogTitle className="flex items-center gap-2"><MessageSquareText className="text-primary" /> Chat with AI about a Shape</DialogTitle>
           <DialogDescription>
             Ask the AI something related to the selected shape. Your message and the AI's response will be posted to the current channel.
-            {!canSubmit && <span className="text-destructive block mt-1">A user and active channel are required.</span>}
+            {!canSubmit && <span className="text-destructive block mt-1">An active channel is required and you must be logged in.</span>}
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -163,7 +150,7 @@ export function AiChatDialog({
             />
             <FormField
               control={form.control}
-              name="contextShapeId" // Renamed from shapeId
+              name="contextShapeId"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Discuss this Shape (Context)</FormLabel>

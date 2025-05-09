@@ -1,9 +1,11 @@
+
 export interface User {
-  id: string;
-  name: string;
-  avatarUrl?: string; // URL to user's avatar image
-  isBot?: boolean; // Flag to indicate if this user is a bot
-  dataAiHint?: string; // Hint for AI image generation (e.g., "user profile", "bot avatar")
+  uid: string; // Firebase User ID or custom Bot ID
+  name: string | null; 
+  avatarUrl?: string | null; 
+  email?: string | null; // Firebase email, optional for bots
+  isBot?: boolean; 
+  dataAiHint?: string; 
 }
 
 export interface Shape {
@@ -24,7 +26,7 @@ export type MessageContent =
 
 export interface Message {
   id: string;
-  userId: string; // ID of the user who sent the message, or a bot's ID
+  userId: string; // uid of the user/bot
   channelId: string;
   content: MessageContent;
   timestamp: number; // Unix timestamp
@@ -35,20 +37,19 @@ export interface Channel {
   id: string;
   name: string;
   type: 'channel' | 'dm';
-  members?: string[]; // For DMs or private channels, list of user IDs
+  members?: string[]; // list of user uids (Firebase UIDs for users, bot IDs for bots)
   unreadCount?: number;
-  icon?: React.ElementType; // Optional: Lucide icon component
-  isBotChannel?: boolean; // True if this channel is a DM with a bot
-  botId?: string; // If isBotChannel, the ID of the bot
+  icon?: React.ElementType; 
+  isBotChannel?: boolean; 
+  botId?: string; 
 }
 
 // Configuration for a user-created bot
 export interface BotConfig {
-  id: string; // Unique ID for the bot, will also be its user ID
+  id: string; // Unique ID for the bot, will also be its user ID (uid)
   name: string;
-  shapeUsername: string; // Shapes.inc username for this bot
-  apiKey: string; // Shapes.inc API key for this bot (SECURITY_RISK: For demo only, not for production)
+  shapeUsername: string; 
+  apiKey: string; 
   avatarUrl?: string;
-  ownerUserId: string; // ID of the user who created this bot
+  ownerUserId: string; // Firebase UID of the user who created this bot
 }
-

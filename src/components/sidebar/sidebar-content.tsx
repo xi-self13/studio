@@ -12,12 +12,15 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
+  SidebarTrigger, // Added back
 } from '@/components/ui/sidebar';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AtSign, Hash, Settings, Users, Bot, PlusCircle, LogIn, Cpu } from 'lucide-react';
+import { AtSign, Hash, Settings, Users, Bot, PlusCircle, Cpu, LogOut } from 'lucide-react'; 
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
 
 interface SidebarNavProps {
   channels: Channel[];
@@ -28,7 +31,7 @@ interface SidebarNavProps {
   onOpenSettings: () => void;
   onAddChannel: () => void;
   onOpenCreateBotDialog: () => void;
-  onLogin: () => void; 
+  onLogout: () => void; 
 }
 
 export function AppSidebar({
@@ -40,7 +43,7 @@ export function AppSidebar({
   onOpenSettings,
   onAddChannel,
   onOpenCreateBotDialog,
-  onLogin,
+  onLogout, 
 }: SidebarNavProps) {
 
   return (
@@ -78,7 +81,7 @@ export function AppSidebar({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-               {channels.length === 0 && (
+               {channels.length === 0 && currentUser && ( 
                 <SidebarMenuItem>
                   <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No channels yet.</span>
                    <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:[&:not(:hover)]:hidden hidden">No channels.</span>
@@ -90,11 +93,6 @@ export function AppSidebar({
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
                <span className="flex items-center gap-2"><Users size={16} /> Direct Messages</span>
-               {currentUser && (
-                  <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => { /* Placeholder for New DM */}} aria-label="New DM">
-                    <PlusCircle size={16} />
-                  </Button>
-               )}
             </SidebarGroupLabel>
             <SidebarMenu>
               {directMessages.map((dm) => (
@@ -102,21 +100,21 @@ export function AppSidebar({
                   <SidebarMenuButton
                     onClick={() => onSelectChannel(dm.id)}
                     isActive={activeChannelId === dm.id}
-                    tooltip={dm.name}
+                    tooltip={dm.name || 'DM'}
                     className="justify-start"
                     disabled={!currentUser}
                   >
                     {dm.isBotChannel ? <Bot className="h-5 w-5" /> : (
                        <Avatar className="h-5 w-5">
                          <AvatarImage src={`https://picsum.photos/seed/${dm.id}/40/40`} data-ai-hint={dm.isBotChannel ? "bot avatar" : "profile user"} />
-                         <AvatarFallback>{dm.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+                         <AvatarFallback>{dm.name ? dm.name.substring(0, 1).toUpperCase() : 'D'}</AvatarFallback>
                        </Avatar>
                     )}
                     <span>{dm.name}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {directMessages.length === 0 && (
+              {directMessages.length === 0 && currentUser && ( 
                  <SidebarMenuItem>
                   <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No DMs yet.</span>
                   <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:[&:not(:hover)]:hidden hidden">No DMs.</span>
@@ -148,29 +146,45 @@ export function AppSidebar({
 
       <SidebarFooter className="p-2 mt-auto border-t border-sidebar-border">
         {currentUser ? (
-          <div className="flex items-center justify-between p-2 rounded-md hover:bg-sidebar-accent">
+          <div className="flex items-center justify-between p-2 rounded-md group-data-[collapsible=icon]:flex-col group-data-[collapsible=icon]:gap-2">
             <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
               <Avatar className="h-8 w-8">
-                <AvatarImage src={currentUser.avatarUrl} data-ai-hint={currentUser.dataAiHint || "user avatar"} />
-                <AvatarFallback>{currentUser.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+                <AvatarImage src={currentUser.avatarUrl || undefined} data-ai-hint={currentUser.dataAiHint || "user avatar"} />
+                <AvatarFallback>{currentUser.name ? currentUser.name.substring(0, 1).toUpperCase() : 'U'}</AvatarFallback>
               </Avatar>
-              <span className="text-sm font-medium text-sidebar-foreground">{currentUser.name}</span>
+              <span className="text-sm font-medium text-sidebar-foreground truncate max-w-[100px]">{currentUser.name}</span>
             </div>
-            <Button variant="ghost" size="icon" onClick={onOpenSettings} className="group-data-[collapsible=icon]:w-full">
-                <Settings size={18}/>
-                <span className="sr-only">Settings</span>
-            </Button>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                    <Avatar className="h-8 w-8 hidden group-data-[collapsible=icon]:flex">
+                        <AvatarImage src={currentUser.avatarUrl || undefined} data-ai-hint={currentUser.dataAiHint || "user avatar"} />
+                        <AvatarFallback>{currentUser.name ? currentUser.name.substring(0, 1).toUpperCase() : "U"}</AvatarFallback>
+                    </Avatar>
+                </TooltipTrigger>
+                <TooltipContent side="right" align="center">
+                    <p>{currentUser.name || 'User'}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <div className="flex gap-1 group-data-[collapsible=icon]:flex-col">
+                <Button variant="ghost" size="icon" onClick={onOpenSettings} className="group-data-[collapsible=icon]:w-full">
+                    <Settings size={18}/>
+                    <span className="sr-only">Settings</span>
+                </Button>
+                <Button variant="ghost" size="icon" onClick={onLogout} className="group-data-[collapsible=icon]:w-full">
+                    <LogOut size={18}/>
+                    <span className="sr-only">Logout</span>
+                </Button>
+            </div>
           </div>
         ) : (
-          <div className="flex items-center justify-center p-2 group-data-[collapsible=icon]:p-0">
-             <Button variant="outline" className="w-full group-data-[collapsible=icon]:aspect-square group-data-[collapsible=icon]:p-2" onClick={onLogin}>
-                <LogIn size={18}/>
-                <span className="group-data-[collapsible=icon]:hidden ml-2">Login</span>
-             </Button>
+          <div className="p-2 text-center text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+            Please login to use the app.
           </div>
         )}
       </SidebarFooter>
     </Sidebar>
   );
 }
-

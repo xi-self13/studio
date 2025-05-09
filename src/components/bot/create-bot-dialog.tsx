@@ -32,7 +32,6 @@ const formSchema = z.object({
   name: z.string().min(2, 'Bot name must be at least 2 characters.').max(50, 'Bot name must be 50 characters or less.'),
   shapeUsername: z.string().min(1, 'Shapes.inc username is required.'),
   apiKey: z.string().min(1, 'Shapes.inc API key is required.'),
-  // TODO: Add avatarUrl field if desired
 });
 
 type CreateBotFormValues = z.infer<typeof formSchema>;
@@ -41,7 +40,7 @@ interface CreateBotDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onBotCreated: (botConfig: BotConfig) => void;
-  currentUserId: string;
+  currentUserId: string; // Firebase UID of the user creating the bot
 }
 
 export function CreateBotDialog({ 
@@ -63,18 +62,18 @@ export function CreateBotDialog({
   });
 
   const onSubmit: SubmitHandler<CreateBotFormValues> = async (data) => {
+    if (!currentUserId) {
+      toast({ title: "Error", description: "User not authenticated. Cannot create bot.", variant: "destructive" });
+      return;
+    }
     setIsLoading(true);
     try {
-      // TODO: In a real app, validate API key and shape username with Shapes.inc API if possible
-      // For now, we'll assume they are valid.
-
       const newBotConfig: BotConfig = {
-        id: `bot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`, // Unique ID for the bot
+        id: `bot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`, 
         name: data.name,
         shapeUsername: data.shapeUsername,
-        apiKey: data.apiKey, // SECURITY_RISK: Storing API key this way is for demo purposes only.
-                               // In production, this should be handled securely by a backend.
-        ownerUserId: currentUserId,
+        apiKey: data.apiKey, 
+        ownerUserId: currentUserId, // Store the Firebase UID of the owner
         // avatarUrl: can be added later or use a default
       };
 
@@ -99,7 +98,7 @@ export function CreateBotDialog({
     <Dialog open={isOpen} onOpenChange={(open) => {
       if (!isLoading) {
         onOpenChange(open);
-        if (!open) form.reset(); // Reset form when closing
+        if (!open) form.reset(); 
       }
     }}>
       <DialogContent className="sm:max-w-md bg-card">
@@ -157,7 +156,7 @@ export function CreateBotDialog({
                   Cancel
                 </Button>
               </DialogClose>
-              <Button type="submit" disabled={isLoading}>
+              <Button type="submit" disabled={isLoading || !currentUserId}>
                 {isLoading ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (

@@ -14,7 +14,7 @@ import { Hash, Users, AtSign, MessageCircle, Sparkles, Bot } from 'lucide-react'
 interface ChatViewProps {
   activeChannel: Channel | null;
   messages: Message[]; 
-  currentUser: User | null;
+  currentUser: User | null; // This is now the Firebase User object (or our app's User type derived from it)
   users: User[]; 
   onSendMessage: (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
   onSendAiResponseMessage: (channelId: string, responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => Promise<void>;
@@ -44,12 +44,10 @@ export function ChatView({
       // Optionally, show a toast to login
       return;
     }
-    // No need to check activeChannel here as the dialog itself can be context-less initially,
-    // and the action of sending the message from dialog will check for activeChannel.
     setIsAiChatDialogOpen(true);
   };
 
-  if (!activeChannel || !currentUser) { // Ensure currentUser is also checked for main view
+  if (!activeChannel || !currentUser) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background p-4 text-muted-foreground">
         <MessageCircle className="w-16 h-16 mb-4" />
@@ -61,49 +59,62 @@ export function ChatView({
             onClick={handleOpenAiShapeChatDialog} 
             className="mt-4" 
             variant="outline" 
-            disabled={!currentUser} // Disable if no user
+            disabled={!currentUser} // Disable if no current user
         >
            <Sparkles className="mr-2 h-4 w-4" /> Chat with AI about a Shape
          </Button>
-         {/* AiChatDialog is still rendered to be controlled, but button to open it is conditional */}
-         <AiChatDialog 
-            isOpen={isAiChatDialogOpen} 
-            onOpenChange={setIsAiChatDialogOpen}
-            onAiResponse={async (responseData) => {
-              if (activeChannel?.id && currentUser) { // Ensure active channel & user for sending
-                onSendAiResponseMessage(activeChannel.id, responseData);
-              } else {
-                console.warn("AI Shape Chat: Response received but no active channel or user to post to.");
-                // Optionally, show a toast if currentUser is missing.
-              }
-            }}
-            currentUserId={currentUser?.id}
-            activeChannelId={activeChannel?.id || null} 
-          />
+         {currentUser && activeChannel && ( // Only render dialog if user and channel potentially exist
+            <AiChatDialog 
+                isOpen={isAiChatDialogOpen} 
+                onOpenChange={setIsAiChatDialogOpen}
+                onAiResponse={async (responseData) => {
+                  if (activeChannel?.id && currentUser) { // Redundant check but safe
+                    onSendAiResponseMessage(activeChannel.id, responseData);
+                  } else {
+                    console.warn("AI Shape Chat: Response received but no active channel or user to post to.");
+                  }
+                }}
+                currentUserId={currentUser?.uid} // Pass Firebase UID
+                activeChannelId={activeChannel?.id || null} 
+            />
+         )}
+         {/* Fallback if no active channel for the dialog when button is clicked from this view */}
+         {!activeChannel && currentUser && (
+             <AiChatDialog 
+                isOpen={isAiChatDialogOpen} 
+                onOpenChange={setIsAiChatDialogOpen}
+                onAiResponse={async (responseData) => {
+                    // This case might need a default channel or user notification
+                    console.warn("AI Shape Chat: Response received but no active channel to post to from this context.");
+                }}
+                currentUserId={currentUser?.uid} // Pass Firebase UID
+                activeChannelId={null} // No active channel in this specific view state
+            />
+         )}
       </div>
     );
   }
 
   const currentChannelMessages = messages;
 
-  const getUserById = (userId: string): User | { id: string, name: string, avatarUrl?: string, isBot?: boolean, dataAiHint?: string } => {
-    const foundUser = users.find(u => u.id === userId);
+  const getUserById = (userId: string): User | { uid: string, name: string, avatarUrl?: string | null, isBot?: boolean, dataAiHint?: string } => {
+    const foundUser = users.find(u => u.uid === userId);
     if (foundUser) return foundUser;
-    return { id: userId, name: 'Unknown User', isBot: false, dataAiHint: 'unknown user' }; 
+    return { uid: userId, name: 'Unknown User', isBot: false, dataAiHint: 'unknown user', avatarUrl: null }; 
   };
 
   const getChannelIcon = () => {
     if (!activeChannel) return <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
     if (activeChannel.type === 'dm') {
-      const otherUserId = activeChannel.members?.find(id => id !== currentUser?.id);
-      const otherUser = otherUserId ? users.find(u => u.id === otherUserId) : null;
+      const otherUserId = activeChannel.members?.find(id => id !== currentUser?.uid);
+      const otherUser = otherUserId ? users.find(u => u.uid === otherUserId) : null;
 
       if (otherUser) {
         return (
           <Avatar className="h-6 w-6 mr-2">
-            <AvatarImage src={otherUser.avatarUrl} data-ai-hint={otherUser.dataAiHint || (otherUser.isBot ? "bot avatar" : "profile user")} />
+            <AvatarImage src={otherUser.avatarUrl || undefined} data-ai-hint={otherUser.dataAiHint || (otherUser.isBot ? "bot avatar" : "profile user")} />
             <AvatarFallback>
-              {otherUser.isBot ? <Bot size={12}/> : otherUser.name.substring(0,1).toUpperCase()}
+              {otherUser.isBot ? <Bot size={12}/> : (otherUser.name ? otherUser.name.substring(0,1).toUpperCase() : 'U')}
             </AvatarFallback>
           </Avatar>
         );
@@ -129,13 +140,13 @@ export function ChatView({
             </div>
           )}
           {currentChannelMessages.map(msg => {
-            const sender = getUserById(msg.userId);
+            const sender = getUserById(msg.userId); 
             return (
               <MessageItem 
                 key={msg.id} 
                 message={msg} 
                 sender={sender}
-                isOwnMessage={currentUser ? msg.userId === currentUser.id : false} 
+                isOwnMessage={currentUser ? msg.userId === currentUser.uid : false} // Use Firebase UID for comparison
               />
             );
           })}
@@ -158,11 +169,10 @@ export function ChatView({
                   console.warn("AI Shape Chat dialog: No active channel ID to send response.");
               }
           }}
-          currentUserId={currentUser?.id}
+          currentUserId={currentUser?.uid} // Pass Firebase UID
           activeChannelId={activeChannel?.id || null}
         />
       )}
     </div>
   );
 }
-

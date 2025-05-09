@@ -1,3 +1,4 @@
+
 // src/ai/flows/chat-with-shape-flow.ts
 'use server';
 
@@ -16,7 +17,7 @@ import { getShapeById } from '@/lib/shapes';
 const ChatWithShapeInputSchema = z.object({
   promptText: z.string().describe('The user message to send to the Shape.'),
   contextShapeId: z.string().describe('The ID of the predefined shape used as context for the conversation.'),
-  userId: z.string().describe('The ID of the user initiating the chat.'),
+  userId: z.string().describe('The Firebase UID of the user initiating the chat.'), // Updated description
   channelId: z.string().describe('The ID of the channel where the chat is happening.'),
   // Optional: For user-created bots
   botApiKey: z.string().optional().describe('The API key for the specific bot, if not using default.'),
@@ -63,7 +64,7 @@ export async function chatWithShape(
       headers: {
         'Authorization': `Bearer ${apiKeyToUse}`,
         'Content-Type': 'application/json',
-        'X-User-Id': userId,
+        'X-User-Id': userId, // This should be the Firebase UID of the human user
         'X-Channel-Id': channelId,
       },
       body: JSON.stringify({

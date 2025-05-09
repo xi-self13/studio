@@ -7,7 +7,7 @@ import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
 import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { PanelLeft, Bot, LogIn } from 'lucide-react';
+import { PanelLeft, Bot, LogIn, LogOut } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react'; 
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
@@ -15,9 +15,11 @@ import { PREDEFINED_SHAPES } from '@/lib/shapes';
 import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
 import { ShapeTalkLogo } from '@/components/icons/logo';
+import { auth } from '@/lib/firebase';
+import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser } from 'firebase/auth';
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // For the default bot using env vars
-const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID for the default bot
+const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID (uid) for the default bot
 
 export default function ShapeTalkPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -25,12 +27,12 @@ export default function ShapeTalkPage() {
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>([]); // Will store bots and the current Firebase user
   const [userBots, setUserBots] = useState<BotConfig[]>([]); 
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
   const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
-
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
 
   const { toast } = useToast();
 
@@ -38,43 +40,38 @@ export default function ShapeTalkPage() {
     const botMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
-      userId: botUserId,
+      userId: botUserId, // botUserId is the uid for bots
       content: type === 'ai_response' ? { type, textResponse: text, prompt, sourceShapeId } : { type, text },
       timestamp: Date.now(),
     };
     setMessages(prev => [...prev, botMessage]);
   }, []);
 
-
+  // Initialize default bot user and channels
   useEffect(() => {
-    const initializeApp = async () => {
-      // Setup default bot user - this can happen before login
-      const defaultBotUser: User = { 
-        id: DEFAULT_AI_BOT_USER_ID, 
-        name: 'Shape AI (Default)', 
-        avatarUrl: 'https://picsum.photos/seed/defaultbot/40/40',
-        dataAiHint: 'bot avatar',
-        isBot: true,
-      };
-      setUsers(prevUsers => {
-        if (!prevUsers.find(u => u.id === defaultBotUser.id)) {
-          return [...prevUsers, defaultBotUser];
-        }
-        return prevUsers;
-      });
+    const defaultBotUser: User = { 
+      uid: DEFAULT_AI_BOT_USER_ID, 
+      name: 'Shape AI (Default)', 
+      avatarUrl: 'https://picsum.photos/seed/defaultbot/40/40',
+      dataAiHint: 'bot avatar',
+      isBot: true,
+    };
+    setUsers(prevUsers => {
+      if (!prevUsers.find(u => u.uid === defaultBotUser.uid)) {
+        return [defaultBotUser]; // Start with only the default bot, Firebase user will be added on auth
+      }
+      return prevUsers;
+    });
 
-      // Setup default channels - can happen before login
-      const fetchedChannels: Channel[] = [
-        { id: 'general', name: 'general', type: 'channel', icon: Hash },
-        { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID },
-      ];
-      setChannels(fetchedChannels);
-      // Do not set active channel here, wait for login or user interaction
+    const fetchedChannels: Channel[] = [
+      { id: 'general', name: 'general', type: 'channel', icon: Hash },
+      { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID },
+    ];
+    setChannels(fetchedChannels);
 
-      // Check API health
+    const checkApi = async () => {
       const healthStatus = await checkShapesApiHealth();
       setIsApiHealthy(healthStatus.healthy);
-
       if (!healthStatus.healthy) {
         toast({
           title: "Shapes API Issue (Default Bot)",
@@ -84,36 +81,66 @@ export default function ShapeTalkPage() {
         });
       }
     };
+    checkApi();
+  }, [toast]);
 
-    initializeApp();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); 
+  // Firebase Auth State Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
+      setIsLoadingAuth(false);
+      if (firebaseUser) {
+        const appUser: User = {
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || 'Anonymous User',
+          avatarUrl: firebaseUser.photoURL,
+          email: firebaseUser.email,
+          isBot: false,
+        };
+        setCurrentUser(appUser);
+        setUsers(prevUsers => {
+          const existingUser = prevUsers.find(u => u.uid === appUser.uid);
+          if (existingUser) {
+            return prevUsers.map(u => u.uid === appUser.uid ? appUser : u);
+          }
+          return [...prevUsers.filter(u => u.isBot), appUser]; // Keep bots, add/update Firebase user
+        });
 
-  const handleLogin = useCallback(() => {
-    const fetchedUser: User = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substring(2,9)}`, 
-      name: 'Demo User',
-      avatarUrl: 'https://picsum.photos/seed/demouser/40/40',
-      dataAiHint: 'profile user',
-    };
-    setCurrentUser(fetchedUser);
-    setUsers(prevUsers => {
-      if (!prevUsers.find(u => u.id === fetchedUser.id)) {
-        return [...prevUsers, fetchedUser];
+        if (!activeChannelId && channels.length > 0) {
+          setActiveChannelId(channels[0].id);
+        }
+      } else {
+        setCurrentUser(null);
+        setUsers(prevUsers => prevUsers.filter(u => u.isBot)); // Keep only bot users if logged out
+        setActiveChannelId(null); 
       }
-      return prevUsers;
     });
-
-    // Set active channel after login if none is set
-    if (!activeChannelId && channels.length > 0) {
-      setActiveChannelId(channels[0].id);
-    }
-    toast({ title: "Logged In", description: "Welcome, Demo User!"});
+    return () => unsubscribe();
   }, [activeChannelId, channels]);
 
+  const handleLogin = async () => {
+    setIsLoadingAuth(true);
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+      toast({ title: "Logged In", description: "Welcome!" });
+    } catch (error) {
+      console.error("Login error:", error);
+      toast({ title: "Login Failed", description: (error as Error).message, variant: "destructive" });
+      setIsLoadingAuth(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast({ title: "Logged Out", description: "You have been successfully logged out." });
+    } catch (error) {
+      console.error("Logout error:", error);
+      toast({ title: "Logout Failed", description: (error as Error).message, variant: "destructive" });
+    }
+  };
 
   useEffect(() => {
-    // Initial message for the default bot channel, only if user is logged in
     if (currentUser && isApiHealthy && activeChannelId === DEFAULT_BOT_CHANNEL_ID && !hasSentInitialBotMessageForChannel[DEFAULT_BOT_CHANNEL_ID]) {
       const botMessagesInChannel = messages.filter(msg => msg.channelId === DEFAULT_BOT_CHANNEL_ID && msg.userId === DEFAULT_AI_BOT_USER_ID);
       if (botMessagesInChannel.length === 0) { 
@@ -145,7 +172,7 @@ export default function ShapeTalkPage() {
     const newMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
-      userId: currentUser.id,
+      userId: currentUser.uid, // Use Firebase UID
       content,
       timestamp: Date.now(),
     };
@@ -161,7 +188,7 @@ export default function ShapeTalkPage() {
       if (currentChannel.botId && currentChannel.botId !== DEFAULT_AI_BOT_USER_ID) {
         const userBotConfig = userBots.find(b => b.id === currentChannel.botId);
         if (userBotConfig) {
-          botUserIdToUse = userBotConfig.id;
+          botUserIdToUse = userBotConfig.id; 
           botApiKeyToUse = userBotConfig.apiKey;
           botShapeUsernameToUse = userBotConfig.shapeUsername;
         } else {
@@ -169,6 +196,7 @@ export default function ShapeTalkPage() {
           return;
         }
       } else {
+        // Using default bot
         if (!isApiHealthy) {
           sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm currently unable to connect to my services. Please check the API status or try again later.", "text");
           return;
@@ -186,7 +214,7 @@ export default function ShapeTalkPage() {
         const aiResponse = await chatWithShape({
           promptText: content.text,
           contextShapeId: contextShapeForBot.id, 
-          userId: currentUser.id, 
+          userId: currentUser.uid, // Firebase UID of the interacting user
           channelId: channelId,
           botApiKey: botApiKeyToUse,
           botShapeUsername: botShapeUsernameToUse,   
@@ -247,6 +275,7 @@ export default function ShapeTalkPage() {
         toast({title: "Login Required", description: "Please login to add a channel.", variant: "destructive"});
         return;
     }
+    
     const newChannelName = prompt("Enter new channel name:");
     if (newChannelName) {
       const newChannel: Channel = {
@@ -266,23 +295,28 @@ export default function ShapeTalkPage() {
         toast({title: "Login Required", description: "Please login to add a bot.", variant: "destructive"});
         return;
     }
-
+    
     setUserBots(prev => [...prev, botConfig]);
 
     const botUser: User = {
-      id: botConfig.id,
+      uid: botConfig.id, 
       name: botConfig.name,
       avatarUrl: botConfig.avatarUrl || `https://picsum.photos/seed/${botConfig.id}/40/40`,
       dataAiHint: 'bot avatar',
       isBot: true,
     };
-    setUsers(prev => [...prev, botUser]);
+    setUsers(prev => { 
+        if (!prev.find(u => u.uid === botUser.uid)) {
+            return [...prev, botUser];
+        }
+        return prev;
+    });
 
     const newDmChannel: Channel = {
-      id: `dm_${botConfig.id}_${currentUser.id}`,
+      id: `dm_${botConfig.id}_${currentUser.uid}`, 
       name: botConfig.name, 
       type: 'dm',
-      members: [currentUser.id, botConfig.id],
+      members: [currentUser.uid, botConfig.id],
       isBotChannel: true,
       botId: botConfig.id,
       icon: Bot, 
@@ -294,6 +328,15 @@ export default function ShapeTalkPage() {
 
   const activeChannelDetails = currentUser ? [...channels, ...directMessages].find(c => c.id === activeChannelId) || null : null;
 
+  if (isLoadingAuth) {
+    return (
+      <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground">
+        <ShapeTalkLogo className="w-24 h-24 text-primary mb-6 animate-pulse" />
+        <p className="text-lg text-muted-foreground">Loading application...</p>
+      </div>
+    );
+  }
+
   if (!currentUser) {
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground">
@@ -301,7 +344,7 @@ export default function ShapeTalkPage() {
         <h1 className="text-3xl font-semibold mb-2">Welcome to ShapeTalk</h1>
         <p className="text-muted-foreground mb-8">Chat with AI, discuss shapes, and connect.</p>
         <Button onClick={handleLogin} size="lg">
-          <LogIn className="mr-2 h-5 w-5" /> Login as Demo User
+          <LogIn className="mr-2 h-5 w-5" /> Sign in with Google
         </Button>
          <footer className="absolute bottom-4 text-xs text-muted-foreground">
             © {new Date().getFullYear()} ShapeTalk. Shapes.inc integration for demo purposes.
@@ -322,7 +365,7 @@ export default function ShapeTalkPage() {
           onOpenSettings={handleOpenSettings}
           onAddChannel={handleAddChannel}
           onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
-          onLogin={handleLogin} // Pass login handler
+          onLogout={handleLogout}
         />
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
           <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
@@ -345,10 +388,9 @@ export default function ShapeTalkPage() {
           isOpen={isCreateBotDialogOpen}
           onOpenChange={setIsCreateBotDialogOpen}
           onBotCreated={handleAddBot}
-          currentUserId={currentUser.id}
+          currentUserId={currentUser.uid} // Pass Firebase UID
         />
       )}
     </SidebarProvider>
   );
 }
-

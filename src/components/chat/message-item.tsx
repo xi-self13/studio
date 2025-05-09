@@ -12,22 +12,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 interface MessageItemProps {
   message: Message;
-  sender: User | { id: string, name: string, avatarUrl?: string, isBot?: boolean, dataAiHint?: string }; 
+  sender: User | { uid: string, name: string | null, avatarUrl?: string | null, isBot?: boolean, dataAiHint?: string }; 
   isOwnMessage: boolean;
 }
 
 export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps) {
   const getSenderName = () => {
-    return sender.name;
+    return sender.name || (sender.isBot ? 'Bot' : 'User');
   }
 
   const getAvatar = () => {
     const aiHint = sender.dataAiHint || (sender.isBot ? "bot avatar" : "user profile");
+    const fallbackName = sender.name || (sender.isBot ? 'B' : 'U');
+
     if (sender.isBot) { 
       return (
         <Avatar className="h-10 w-10 bg-primary/20">
           {sender.avatarUrl ? (
-            <AvatarImage src={sender.avatarUrl} data-ai-hint={aiHint} />
+            <AvatarImage src={sender.avatarUrl} alt={`${getSenderName()} avatar`} data-ai-hint={aiHint} />
           ) : null}
           <AvatarFallback><Bot className="text-primary" /></AvatarFallback>
         </Avatar>
@@ -35,8 +37,8 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
     }
     return (
       <Avatar className="h-10 w-10">
-        <AvatarImage src={sender.avatarUrl} data-ai-hint={aiHint} />
-        <AvatarFallback>{sender.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+        <AvatarImage src={sender.avatarUrl || undefined} alt={`${getSenderName()} avatar`} data-ai-hint={aiHint} />
+        <AvatarFallback>{fallbackName.substring(0, 1).toUpperCase()}</AvatarFallback>
       </Avatar>
     );
   }
@@ -102,4 +104,3 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
     </div>
   );
 }
-
