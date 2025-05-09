@@ -6,6 +6,7 @@ export interface User {
   email?: string | null; // Firebase email, optional for bots
   isBot?: boolean; 
   dataAiHint?: string; 
+  statusMessage?: string; // New field for user status
 }
 
 export interface Shape {
@@ -36,7 +37,8 @@ export interface Message {
 export interface Channel {
   id: string; 
   name: string;
-  type: 'channel' | 'dm' | 'group';
+  type: 'channel' | 'dm' | 'group'; // Type of channel
+  serverId?: string; // ID of the server this channel belongs to, if applicable
   members?: string[]; 
   unreadCount?: number;
   icon?: React.ElementType; 
@@ -82,4 +84,23 @@ export interface BotGroup {
   avatarUrl?: string;
   botIds: string[];      // Array of BotConfig IDs that are members of this group
   memberUserIds: string[]; // Array of User UIDs (besides owner) who are members of this group (future use for multi-user groups)
+}
+
+// New Server type
+export interface Server {
+  id: string;
+  name: string;
+  ownerUserId: string;
+  avatarUrl?: string;
+  dataAiHint?: string; // for placeholder images
+  channelIds?: string[]; // IDs of channels belonging to this server
+  memberUserIds?: string[]; // IDs of users who are members (including owner)
+}
+
+// New Typing Indicator type
+export interface TypingIndicator {
+  userId: string;
+  userName: string; // To display "User X is typing"
+  channelId: string;
+  timestamp: number; // To clear old indicators
 }

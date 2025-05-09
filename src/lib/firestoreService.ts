@@ -15,20 +15,37 @@ import {
   getDoc,
   updateDoc,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  serverTimestamp // For typing indicators potentially
 } from 'firebase/firestore'; 
-import type { BotConfig, PlatformShape, BotGroup } from '@/types'; 
+import type { BotConfig, PlatformShape, BotGroup, Server, TypingIndicator, User } from '@/types'; 
 
 const USER_BOTS_COLLECTION = 'userBots'; 
 const PLATFORM_SHAPES_COLLECTION = 'platformShapes'; 
-const BOT_GROUPS_COLLECTION = 'botGroups'; // Collection for Bot Groups
+const BOT_GROUPS_COLLECTION = 'botGroups';
+const SERVERS_COLLECTION = 'servers'; // New collection for Servers
+const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; // New collection for Typing Indicators
+const USERS_COLLECTION = 'users';
+
+
+// --- User Profile Functions ---
+export async function updateUserProfileInFirestore(userId: string, profileData: Partial<Pick<User, 'name' | 'avatarUrl' | 'statusMessage'>>): Promise<void> {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    await updateDoc(userDocRef, profileData);
+    console.log(`User profile for ${userId} updated.`);
+  } catch (error) {
+    console.error('Error updating user profile in Firestore:', error);
+    throw new Error('Failed to update user profile.');
+  }
+}
+
 
 // --- BotConfig Functions --- 
 
 export async function saveUserBotConfigToFirestore(botConfig: BotConfig): Promise<void> {
   try {
     const botDocRef = doc(db, USER_BOTS_COLLECTION, botConfig.id);
-    // Ensure all fields from BotConfig are explicitly handled or set to null/default if optional and not provided
     const dataToSave = {
         name: botConfig.name,
         shapeUsername: botConfig.shapeUsername,
@@ -60,7 +77,7 @@ export async function getUserBotConfigsFromFirestore(userId: string): Promise<Bo
         id: docSnap.id,
         name: data.name,
         shapeUsername: data.shapeUsername,
-        apiKey: data.apiKey, // This key should ideally not be sent to client unless absolutely necessary and secured.
+        apiKey: data.apiKey, 
         ownerUserId: data.ownerUserId,
         avatarUrl: data.avatarUrl,
         isPublic: data.isPublic || false,
@@ -71,7 +88,7 @@ export async function getUserBotConfigsFromFirestore(userId: string): Promise<Bo
     return botConfigs;
   } catch (error) {
     console.error('Error retrieving bot configurations from Firestore:', error);
-    return []; // Return empty array on error
+    return []; 
   }
 }
 
@@ -85,7 +102,7 @@ export async function getBotConfigFromFirestore(botId: string): Promise<BotConfi
         id: docSnap.id,
         name: data.name,
         shapeUsername: data.shapeUsername,
-        apiKey: data.apiKey, // Sensitive
+        apiKey: data.apiKey, 
         ownerUserId: data.ownerUserId,
         avatarUrl: data.avatarUrl,
         isPublic: data.isPublic || false,
@@ -108,21 +125,17 @@ export async function getPublicUserBotsFromFirestore(): Promise<BotConfig[]> {
     
     const publicBots: BotConfig[] = [];
     querySnapshot.forEach((docSnap) => {
-       // For public listings, we should not expose the API key.
-       // The component rendering this will need to handle interaction differently,
-       // perhaps by initiating a DM or a specific action that doesn't require client-side API key.
        const data = docSnap.data();
       publicBots.push({
         id: docSnap.id,
         name: data.name,
         shapeUsername: data.shapeUsername,
-        // apiKey: data.apiKey, // DO NOT EXPOSE API KEY PUBLICLY
-        apiKey: '***', // Mask or omit for public listings
+        apiKey: '***', 
         ownerUserId: data.ownerUserId,
         avatarUrl: data.avatarUrl,
-        isPublic: true, // by definition of the query
-        systemPrompt: data.systemPrompt, // Personality might be fine to show
-        greetingMessage: data.greetingMessage, // Greeting might be fine
+        isPublic: true, 
+        systemPrompt: data.systemPrompt, 
+        greetingMessage: data.greetingMessage,
        } as BotConfig);
     });
     return publicBots;
@@ -153,7 +166,7 @@ export async function getPlatformShapesFromFirestore(): Promise<PlatformShape[]>
     const shapes: PlatformShape[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
-      shapes.push({ // Ensure all fields from PlatformShape are included
+      shapes.push({ 
         id: docSnap.id, 
         name: data.name,
         description: data.description,
@@ -161,8 +174,8 @@ export async function getPlatformShapesFromFirestore(): Promise<PlatformShape[]>
         dataAiHint: data.dataAiHint,
         shapeUsername: data.shapeUsername,
         tags: data.tags || [],
-        isUserCreated: false, // Explicitly set for platform shapes
-        ownerDisplayName: 'Platform', // Platform shapes don't have individual owners
+        isUserCreated: false, 
+        ownerDisplayName: 'Platform', 
       } as PlatformShape);
     });
     return shapes;
@@ -172,27 +185,22 @@ export async function getPlatformShapesFromFirestore(): Promise<PlatformShape[]>
   }
 }
 
-// Function to add/update platform shapes (e.g. for seeding by an admin)
-// Note: 'id' can be provided to update an existing shape, or omitted for a new one.
 export async function addPlatformShapeToFirestore(shapeData: Omit<PlatformShape, 'isUserCreated' | 'ownerDisplayName'> & { id?: string }): Promise<PlatformShape> {
   try {
     let docRef;
     let idToUse = shapeData.id;
 
-    // Prepare data for Firestore, removing 'id' if it exists as it's used for the doc path
     const dataForFirestore: any = { ...shapeData };
     if (idToUse) {
-      delete dataForFirestore.id; // 'id' field is used as document ID, not stored in document data itself
+      delete dataForFirestore.id; 
       docRef = doc(db, PLATFORM_SHAPES_COLLECTION, idToUse);
       await setDoc(docRef, dataForFirestore);
     } else {
-      // If no ID, Firestore auto-generates one
-      const { id, ...dataWithoutId } = shapeData; // remove id if it was accidentally passed as undefined
+      const { id, ...dataWithoutId } = shapeData; 
       docRef = await addDoc(collection(db, PLATFORM_SHAPES_COLLECTION), dataWithoutId);
       idToUse = docRef.id;
     }
     
-    // Return the full PlatformShape object as it would be fetched
     return { ...shapeData, id: idToUse!, isUserCreated: false, ownerDisplayName: 'Platform' } as PlatformShape;
   } catch (error) {
     console.error('Error adding/updating platform shape to Firestore:', error);
@@ -200,14 +208,13 @@ export async function addPlatformShapeToFirestore(shapeData: Omit<PlatformShape,
   }
 }
 
-// Example seeding function - run this once (e.g. via a script or admin UI)
 export async function seedPlatformShapes() {
   const shapesToSeed: Array<Omit<PlatformShape, 'isUserCreated' | 'ownerDisplayName'> & { id?: string }> = [
     {
-      id: 'artemis-ai-official', // Use a specific ID for predictable seeding/updates
+      id: 'artemis-ai-official', 
       name: 'Artemis AI',
       description: 'A creative AI that excels at visual concepts and artistic ideas. She is very friendly and loves to help with art projects.',
-      shapeUsername: 'artemis_official', // Replace with actual username from Shapes.inc
+      shapeUsername: 'artemis_official', 
       avatarUrl: 'https://picsum.photos/seed/artemisai/100/100',
       dataAiHint: 'female robot',
       tags: ['creative', 'visual', 'art', 'friendly'],
@@ -216,7 +223,7 @@ export async function seedPlatformShapes() {
       id: 'scholar-bot-prime',
       name: 'Scholar Bot Prime',
       description: 'A knowledgeable AI assistant for research and learning. Always formal and precise in its responses.',
-      shapeUsername: 'scholar_prime', // Replace with actual username
+      shapeUsername: 'scholar_prime', 
       avatarUrl: 'https://picsum.photos/seed/scholarbot/100/100',
       dataAiHint: 'wise owl',
       tags: ['knowledge', 'research', 'education', 'formal'],
@@ -226,9 +233,6 @@ export async function seedPlatformShapes() {
   let seededCount = 0;
   for (const shape of shapesToSeed) {
     try {
-      // Check if shape already exists to prevent duplicate entries if not using specific IDs
-      // If using specific IDs like above, setDoc with merge:true could also work, or simply overwrite.
-      // For this example, we'll assume addPlatformShapeToFirestore handles overwrite/creation if ID is given.
       await addPlatformShapeToFirestore(shape);
       seededCount++;
     } catch (e) {
@@ -245,15 +249,12 @@ export async function seedPlatformShapes() {
 
 const botGroupsCollectionRef = collection(db, BOT_GROUPS_COLLECTION);
 
-/**
- * Creates a new bot group in Firestore.
- */
 export async function createBotGroup(groupData: Omit<BotGroup, 'id'>): Promise<BotGroup> {
   try {
     const docRef = await addDoc(botGroupsCollectionRef, {
       ...groupData,
-      botIds: groupData.botIds || [], // Ensure default empty array
-      memberUserIds: groupData.memberUserIds || [], // Ensure default empty array
+      botIds: groupData.botIds || [], 
+      memberUserIds: groupData.memberUserIds || [], 
       description: groupData.description || null,
       avatarUrl: groupData.avatarUrl || null,
     });
@@ -265,14 +266,9 @@ export async function createBotGroup(groupData: Omit<BotGroup, 'id'>): Promise<B
   }
 }
 
-/**
- * Updates an existing bot group in Firestore.
- * Only allows updating fields editable by the owner, excluding ownerUserId and id.
- */
 export async function updateBotGroup(groupId: string, updates: Partial<Omit<BotGroup, 'id' | 'ownerUserId'>>): Promise<void> {
   try {
     const groupDocRef = doc(db, BOT_GROUPS_COLLECTION, groupId);
-    // Consider adding a check here to ensure the currentUser is the owner before allowing update
     await updateDoc(groupDocRef, updates);
     console.log(`Bot group with ID: ${groupId} updated.`);
   } catch (error) {
@@ -281,9 +277,6 @@ export async function updateBotGroup(groupId: string, updates: Partial<Omit<BotG
   }
 }
 
-/**
- * Retrieves all bot groups where the given user ID is the owner.
- */
 export async function getOwnedBotGroupsFromFirestore(userId: string): Promise<BotGroup[]> {
   try {
     const q = query(botGroupsCollectionRef, where('ownerUserId', '==', userId));
@@ -309,16 +302,10 @@ export async function getOwnedBotGroupsFromFirestore(userId: string): Promise<Bo
   }
 }
 
-/**
- * Retrieves all bot groups where the given user ID is listed in memberUserIds.
- * (Future use if human users can be direct members of bot groups for chat purposes)
- */
 export async function getMemberBotGroupsFromFirestore(userId: string): Promise<BotGroup[]> {
   try {
-    // This query finds groups where the user is a member, excluding those they own (if desired)
     const q = query(botGroupsCollectionRef, 
       where('memberUserIds', 'array-contains', userId)
-      // Optionally add: where('ownerUserId', '!=', userId) if owners shouldn't appear as members
     );
     const querySnapshot = await getDocs(q);
     
@@ -343,9 +330,6 @@ export async function getMemberBotGroupsFromFirestore(userId: string): Promise<B
 }
 
 
-/**
- * Retrieves a single bot group by its ID from Firestore.
- */
 export async function getBotGroupFromFirestore(groupId: string): Promise<BotGroup | null> {
   try {
     const groupDocRef = doc(db, BOT_GROUPS_COLLECTION, groupId);
@@ -366,14 +350,10 @@ export async function getBotGroupFromFirestore(groupId: string): Promise<BotGrou
     return null;
   } catch (error) {
     console.error(`Error retrieving bot group ${groupId} from Firestore:`, error);
-    return null; // Return null on error
+    return null; 
   }
 }
 
-/**
- * Deletes a specific bot group from Firestore.
- * Note: Implement permission check in UI or via Firebase Rules to ensure only owner can delete.
- */
 export async function deleteBotGroupFromFirestore(groupId: string): Promise<void> {
   try {
     const groupDocRef = doc(db, BOT_GROUPS_COLLECTION, groupId);
@@ -385,13 +365,9 @@ export async function deleteBotGroupFromFirestore(groupId: string): Promise<void
   }
 }
 
-/**
- * Adds a bot to a group's botIds array.
- */
 export async function addBotToGroupInFirestore(groupId: string, botId: string): Promise<void> {
   try {
     const groupDocRef = doc(db, BOT_GROUPS_COLLECTION, groupId);
-    // Consider checks: is botId valid? is bot public or owned by group owner?
     await updateDoc(groupDocRef, {
       botIds: arrayUnion(botId)
     });
@@ -402,9 +378,6 @@ export async function addBotToGroupInFirestore(groupId: string, botId: string): 
   }
 }
 
-/**
- * Removes a bot from a group's botIds array.
- */
 export async function removeBotFromGroupInFirestore(groupId: string, botId: string): Promise<void> {
   try {
     const groupDocRef = doc(db, BOT_GROUPS_COLLECTION, groupId);
@@ -413,7 +386,81 @@ export async function removeBotFromGroupInFirestore(groupId: string, botId: stri
     });
     console.log(`Bot ${botId} removed from group ${groupId}.`);
   } catch (error) {
-    console.error(`Error adding bot ${botId} to group ${groupId}:`, error);
-    throw new Error('Failed to add bot to group.');
+    console.error(`Error removing bot ${botId} from group ${groupId}:`, error); // Corrected log message
+    throw new Error('Failed to remove bot from group.'); // Corrected error message
+  }
+}
+
+
+// --- Server Functions ---
+const serversCollectionRef = collection(db, SERVERS_COLLECTION);
+
+export async function createServerInFirestore(serverData: Omit<Server, 'id' | 'channelIds' | 'memberUserIds'> & { ownerUserId: string }): Promise<Server> {
+  try {
+    const newServerData = {
+      ...serverData,
+      channelIds: [], // Initialize with no channels
+      memberUserIds: [serverData.ownerUserId], // Owner is the first member
+      avatarUrl: serverData.avatarUrl || `https://picsum.photos/seed/${Date.now()}/100/100`, // Default avatar
+      dataAiHint: serverData.dataAiHint || 'server icon',
+    };
+    const docRef = await addDoc(serversCollectionRef, newServerData);
+    console.log(`Server "${serverData.name}" created with ID: ${docRef.id} by user ${serverData.ownerUserId}.`);
+    return { ...newServerData, id: docRef.id };
+  } catch (error) {
+    console.error('Error creating server in Firestore:', error);
+    throw new Error('Failed to create server.');
+  }
+}
+
+export async function getServersForUserFromFirestore(userId: string): Promise<Server[]> {
+  try {
+    // Get servers where the user is an owner OR a member
+    const q = query(serversCollectionRef, where('memberUserIds', 'array-contains', userId));
+    const querySnapshot = await getDocs(q);
+    
+    const servers: Server[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      servers.push({
+        id: docSnap.id,
+        name: data.name,
+        ownerUserId: data.ownerUserId,
+        avatarUrl: data.avatarUrl,
+        dataAiHint: data.dataAiHint,
+        channelIds: data.channelIds || [],
+        memberUserIds: data.memberUserIds || [],
+      } as Server);
+    });
+    return servers;
+  } catch (error) {
+    console.error(`Error retrieving servers for user ${userId} from Firestore:`, error);
+    return [];
+  }
+}
+
+// --- Typing Indicator Functions (Basic Structure) ---
+// These functions form the basis. Real-time listeners would be set up on the client.
+
+export async function setTypingIndicatorInFirestore(typingIndicator: TypingIndicator): Promise<void> {
+  try {
+    // Using channelId_userId as document ID for easy lookup/overwrite
+    const indicatorDocRef = doc(db, TYPING_INDICATORS_COLLECTION, `${typingIndicator.channelId}_${typingIndicator.userId}`);
+    await setDoc(indicatorDocRef, {
+      ...typingIndicator,
+      timestamp: serverTimestamp() // Use server timestamp for reliable TTL later if needed
+    });
+  } catch (error) {
+    console.error('Error setting typing indicator:', error);
+    // Don't throw, as this is a non-critical feature for basic chat
+  }
+}
+
+export async function removeTypingIndicatorFromFirestore(channelId: string, userId: string): Promise<void> {
+  try {
+    const indicatorDocRef = doc(db, TYPING_INDICATORS_COLLECTION, `${channelId}_${userId}`);
+    await deleteDoc(indicatorDocRef);
+  } catch (error) {
+    console.error('Error removing typing indicator:', error);
   }
 }
