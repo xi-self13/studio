@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useEffect, useState } from 'react';
@@ -39,6 +40,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Label } from '@/components/ui/label'; // Added import for Label
 
 const formSchema = z.object({
   name: z.string().min(2, 'Group name must be at least 2 characters.').max(50, 'Group name must be 50 characters or less.'),
