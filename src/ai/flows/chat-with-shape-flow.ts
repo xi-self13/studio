@@ -1,4 +1,3 @@
-
 // src/ai/flows/chat-with-shape-flow.ts
 'use server';
 
@@ -62,7 +61,6 @@ export async function chatWithShape(
   const shapeNameForContext = selectedShape?.name || 'the selected concept';
   
   let userMessageContent = promptText;
-  // Prepend system prompt to user message content as Shapes API uses the last user message and has shape settings for system prompts.
   if (systemPrompt) {
     userMessageContent = `${systemPrompt}\n\nUser query regarding "${shapeNameForContext}": ${promptText}`;
   } else {
@@ -76,11 +74,8 @@ export async function chatWithShape(
         model: `shapesinc/${shapeUsernameToUse}`,
         userId,
         channelId,
-        // Do not log messagesPayload directly if it contains sensitive info from systemPrompt or promptText
-        // Or log a truncated/anonymized version if necessary for debugging
         messageContentLength: userMessageContent.length
     };
-    // console.log('Requesting Shapes API with payload:', requestPayloadLog);
 
     const response = await fetch('https://api.shapes.inc/v1/chat/completions', {
       method: 'POST',
@@ -96,13 +91,13 @@ export async function chatWithShape(
       }),
     });
 
-    const responseBodyText = await response.text(); // Read body once as text for reliable error reporting
+    const responseBodyText = await response.text(); 
 
     if (!response.ok) {
       console.error('Shapes API Error Details:', {
         status: response.status,
         statusText: response.statusText,
-        body: responseBodyText, // Log the full text body of the error
+        body: responseBodyText, 
         requestDetails: requestPayloadLog
       });
       
@@ -112,10 +107,9 @@ export async function chatWithShape(
         if (parsedError && parsedError.error && parsedError.error.message) {
           detailedErrorMessage += ` Message: ${parsedError.error.message}`;
         } else if (responseBodyText) {
-          detailedErrorMessage += ` Details: ${responseBodyText.substring(0, 300)}`; // Truncate long non-JSON error bodies
+          detailedErrorMessage += ` Details: ${responseBodyText.substring(0, 300)}`;
         }
       } catch (e) {
-        // Response body was not JSON
         if (responseBodyText) {
           detailedErrorMessage += ` Details: ${responseBodyText.substring(0, 300)}`;
         }
@@ -123,7 +117,6 @@ export async function chatWithShape(
       throw new Error(detailedErrorMessage);
     }
 
-    // If response.ok, try to parse the successful response as JSON
     try {
       const responseData = JSON.parse(responseBodyText);
       const aiMessage = responseData.choices?.[0]?.message?.content;
@@ -139,14 +132,16 @@ export async function chatWithShape(
     }
 
   } catch (error) {
-    // This catches errors from fetch itself (e.g., network errors) or errors explicitly thrown above
-    console.error('Exception in chatWithShape:', error);
+    console.error('Exception during Shapes API call in chatWithShape:', error); // Log the original error
     if (error instanceof Error) {
-      // Re-throw the existing error object; ensure its message is a string.
-      throw new Error(error.message || 'An unknown error occurred in chatWithShape.');
+        // Check if the error message indicates a fetch-related failure (e.g., network error)
+        if (error.message.toLowerCase().includes('fetch') || error.message.toLowerCase().includes('network') || error.message.toLowerCase().includes('dns')) {
+             throw new Error('Network connection to the Shapes API failed. Please check your internet connection or try again later.');
+        }
+        // For other errors that are already Error instances, re-throw their message or a generic one.
+        throw new Error(error.message || 'An error occurred while processing the request with the Shapes API.');
     }
-    // Wrap non-Error objects if any somehow reach here, though less likely with modern JS
+    // For non-Error objects caught (less common)
     throw new Error('An unknown error occurred while communicating with the Shapes API.');
   }
 }
-
