@@ -20,16 +20,16 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Settings, Bot, PlusCircle, Cpu, LogOut, UserCog, Users2 as BotGroupsIcon, Hash, Users as UsersIcon } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Skeleton } from '@/components/ui/skeleton'; // Added Skeleton
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface MainChannelSidebarContentProps {
   channels: Channel[];
   directMessages: Channel[];
   botGroups: BotGroup[];
-  currentUser: User; // Assumed to be non-null when this component is rendered
+  currentUser: User; 
   activeServerId: string | null;
   activeChannelId: string | null;
-  serverName?: string; // Name of the active server or general title like "ShapeTalk"
+  serverName?: string; 
   onSelectChannel: (channelId: string) => void;
   onOpenAccountSettings: () => void;
   onAddChannel: (serverId: string) => void;
@@ -38,6 +38,7 @@ interface MainChannelSidebarContentProps {
   onOpenManageBotGroupDialog: (groupId: string) => void;
   onLogout: () => void;
   isLoadingUserBots?: boolean;
+  isLoadingServers?: boolean; 
 }
 
 export function MainChannelSidebarContent({
@@ -56,6 +57,7 @@ export function MainChannelSidebarContent({
   onOpenManageBotGroupDialog,
   onLogout,
   isLoadingUserBots = false,
+  isLoadingServers = false, 
 }: MainChannelSidebarContentProps) {
 
   const usersMap = React.useMemo(() => {
@@ -63,8 +65,6 @@ export function MainChannelSidebarContent({
     directMessages.forEach(dm => {
       dm.members?.forEach(memberId => {
         if (!tempUsers[memberId] && memberId !== currentUser.uid) {
-          // This is a simplified user mapping for DMs. A more robust solution would fetch user details.
-          // For now, we use DM name or a generic placeholder.
           const dmBot = dm.isBotChannel && dm.botId === memberId;
           tempUsers[memberId] = {
             name: dm.name || 'User',
@@ -91,7 +91,7 @@ export function MainChannelSidebarContent({
 
       <SidebarContent asChild>
         <ScrollArea className="h-full">
-          {activeServerId && ( /* Server specific content */
+          {activeServerId && ( 
             <SidebarGroup>
               <SidebarGroupLabel className="flex items-center justify-between">
                 <span className="flex items-center gap-2"><Hash size={16} /> Channels</span>
@@ -100,7 +100,8 @@ export function MainChannelSidebarContent({
                 </Button>
               </SidebarGroupLabel>
               <SidebarMenu>
-                {channels.map((channel) => (
+                {isLoadingServers && [1,2].map(i => <SidebarMenuItem key={`skel-chan-${i}`}><SidebarMenuSkeleton showIcon /></SidebarMenuItem>)}
+                {!isLoadingServers && channels.map((channel) => (
                   <SidebarMenuItem key={channel.id}>
                     <SidebarMenuButton
                       onClick={() => onSelectChannel(channel.id)}
@@ -113,7 +114,7 @@ export function MainChannelSidebarContent({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 ))}
-                {channels.length === 0 && (
+                {!isLoadingServers && channels.length === 0 && (
                   <SidebarMenuItem>
                     <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No channels yet.</span>
                     <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:[&:not(:hover)]:hidden hidden">No channels.</span>
@@ -123,7 +124,7 @@ export function MainChannelSidebarContent({
             </SidebarGroup>
           )}
 
-          {!activeServerId && ( /* Global/DM content */
+          {!activeServerId && ( 
             <>
               <SidebarGroup>
                 <SidebarGroupLabel className="flex items-center justify-between">
@@ -230,7 +231,6 @@ export function MainChannelSidebarContent({
             </Avatar>
             <span className="text-sm font-medium text-sidebar-foreground truncate max-w-[100px]">{currentUser.name}</span>
           </div>
-          {/* Tooltip for collapsed state user avatar - this part might need context from parent or useSidebar hook */}
           <Avatar className="h-8 w-8 hidden group-data-[collapsible=icon]:flex">
               <AvatarImage src={currentUser.avatarUrl || undefined} data-ai-hint={currentUser.dataAiHint || "user avatar"} />
               <AvatarFallback>{currentUser.name ? currentUser.name.substring(0, 1).toUpperCase() : "U"}</AvatarFallback>
@@ -251,3 +251,5 @@ export function MainChannelSidebarContent({
     </>
   );
 }
+
+    

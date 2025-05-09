@@ -178,18 +178,15 @@ export default function ShapeTalkPage() {
     try {
       const userServers = await getServersForUserFromFirestore(userId);
       setServers(userServers);
-      if (userServers.length > 0 && !activeServerId) {
-        // setActiveServerId(userServers[0].id); 
-      } else if (userServers.length === 0) {
-        setActiveServerId(null); 
-      }
+      // Removed logic that sets activeServerId here to prevent loops
+      // activeServerId will be managed by user interaction or initial load logic elsewhere
     } catch (error) {
       console.error("Failed to load user servers:", error);
       toast({ title: "Error Loading Servers", description: "Could not fetch your servers.", variant: "destructive" });
     } finally {
       setIsLoadingServers(false);
     }
-  }, [activeServerId, toast]);
+  }, [toast]); // Removed activeServerId dependency, only toast (stable) remains
   
 
   useEffect(() => {
@@ -339,7 +336,6 @@ export default function ShapeTalkPage() {
 
 
   const handleAuthStateChangeLogic = useCallback(async (firebaseUser: FirebaseUser | null) => {
-    setIsLoadingAuth(false);
     if (firebaseUser) {
       const userDocRef = doc(db, USERS_COLLECTION, firebaseUser.uid);
       const userSnap = await getDoc(userDocRef);
@@ -403,6 +399,7 @@ export default function ShapeTalkPage() {
       setChannels(prevCh => prevCh.filter(c => globalChannelIds.has(c.id) && !c.isBotGroup && !c.serverId));
       handleLogoutLogicForActiveChannel();
     }
+    setIsLoadingAuth(false); 
   }, [
       loadUserBots, loadUserBotGroups, loadUserServers, 
       handleLogoutLogicForActiveChannel 
@@ -412,7 +409,7 @@ export default function ShapeTalkPage() {
     setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, handleAuthStateChangeLogic);
     return () => unsubscribe();
-  }, [handleAuthStateChangeLogic]);
+  }, [handleAuthStateChangeLogic]); // handleAuthStateChangeLogic is now stable due to its own dependencies being stable
 
   useEffect(() => {
     if (currentUser) {
@@ -499,6 +496,7 @@ export default function ShapeTalkPage() {
       toast({ title: "Logged In Successfully!", description: `Welcome back, ${user.displayName || user.email}!` });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Login");
+      setIsLoadingAuth(false); // Ensure loading state is reset on error
     }
   };
 
@@ -515,6 +513,7 @@ export default function ShapeTalkPage() {
       toast({ title: "Logged In Successfully!" });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Login");
+      setIsLoadingAuth(false); 
     }
   };
 
@@ -540,6 +539,7 @@ export default function ShapeTalkPage() {
       toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Sign Up");
+      setIsLoadingAuth(false);
     }
   };
   const handleLogout = async () => {
@@ -576,7 +576,7 @@ export default function ShapeTalkPage() {
     }
   }, [currentUser, activeChannelId, channels, directMessages, userBots, isApiHealthy, messages, sendBotMessageUtil, hasSentInitialBotMessageForChannel]);
 
-  const handleSelectServer = (serverId: string | null) => { // Allow null for DM view
+  const handleSelectServer = (serverId: string | null) => { 
     if (serverId === activeServerId) return;
     setActiveServerId(serverId);
     setActiveChannelId(null); 
@@ -1151,7 +1151,7 @@ export default function ShapeTalkPage() {
   const activeChannelDetails = currentUser && activeChannelId ? allAvailableChannels.find(c => c.id === activeChannelId) || null : null;
 
 
-  if (isLoadingAuth && !currentUser) { // Only show full page loader if auth is truly loading AND no user yet
+  if (isLoadingAuth && !currentUser) { 
     return (
       <div className="flex items-center justify-center h-screen bg-background text-foreground">
         <Loader2 className="h-12 w-12 animate-spin text-primary mr-4" />
@@ -1198,11 +1198,11 @@ export default function ShapeTalkPage() {
     );
   }
 
-  const channelsForMainSidebar = activeServerId
+  const channelsForMainSidebar = activeServerId 
     ? channels.filter(c => c.serverId === activeServerId && !c.isBotGroup && !c.isBotChannel && !c.isAiLounge)
     : [];
   
-  const botGroupsForMainSidebar = activeServerId ? [] : botGroups; // Assuming bot groups are global for now
+  const botGroupsForMainSidebar = activeServerId ? [] : botGroups; 
   const directMessagesForMainSidebar = activeServerId ? [] : directMessages;
 
 
@@ -1238,11 +1238,10 @@ export default function ShapeTalkPage() {
                     onOpenManageBotGroupDialog={handleOpenManageBotGroupDialog}
                     onLogout={handleLogout}
                     isLoadingUserBots={isLoadingUserBots || isLoadingBotGroups}
+                    isLoadingServers={isLoadingServers} 
                 />
             </Sidebar>
          ) : (
-            // Optional: A placeholder for the main sidebar area if user is not logged in
-            // but server rail is visible. Or, ServerRail also hides if !currentUser.
             <div className="w-0 md:w-64 bg-sidebar-background border-r border-sidebar-border p-4 text-center text-sidebar-foreground shrink-0"></div>
          )}
 
@@ -1330,3 +1329,6 @@ export default function ShapeTalkPage() {
     </div>
   );
 }
+
+
+    
