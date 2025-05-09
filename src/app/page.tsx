@@ -20,6 +20,7 @@ import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { Separator } from '@/components/ui/separator';
+import { getUserBotConfigsFromFirestore } from '@/lib/firestoreService'; // Import Firestore service
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // For the default bot using env vars
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID (uid) for the default bot
@@ -30,12 +31,13 @@ export default function ShapeTalkPage() {
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([]); // Will store bots and the current Firebase user
+  const [users, setUsers] = useState<User[]>([]); 
   const [userBots, setUserBots] = useState<BotConfig[]>([]); 
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
   const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [isLoadingUserBots, setIsLoadingUserBots] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -47,7 +49,7 @@ export default function ShapeTalkPage() {
     const botMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
-      userId: botUserId, // botUserId is the uid for bots
+      userId: botUserId, 
       content: type === 'ai_response' ? { type, textResponse: text, prompt, sourceShapeId } : { type, text },
       timestamp: Date.now(),
     };
@@ -63,9 +65,10 @@ export default function ShapeTalkPage() {
       dataAiHint: 'bot avatar',
       isBot: true,
     };
+    
     setUsers(prevUsers => {
       if (!prevUsers.find(u => u.uid === defaultBotUser.uid)) {
-        return [defaultBotUser]; // Start with only the default bot, Firebase user will be added on auth
+        return [defaultBotUser]; 
       }
       return prevUsers;
     });
@@ -91,6 +94,50 @@ export default function ShapeTalkPage() {
     checkApi();
   }, [toast]);
 
+  // Function to load user-specific bots from Firestore
+  const loadUserBots = useCallback(async (userId: string) => {
+    setIsLoadingUserBots(true);
+    try {
+      const fetchedBotConfigs = await getUserBotConfigsFromFirestore(userId);
+      setUserBots(fetchedBotConfigs);
+
+      // Update users and directMessages states with these bots
+      const botUsers: User[] = fetchedBotConfigs.map(bc => ({
+        uid: bc.id,
+        name: bc.name,
+        avatarUrl: bc.avatarUrl || `https://picsum.photos/seed/${bc.id}/40/40`,
+        dataAiHint: 'bot avatar',
+        isBot: true,
+      }));
+
+      const botDMs: Channel[] = fetchedBotConfigs.map(bc => ({
+        id: `dm_${bc.id}_${userId}`,
+        name: bc.name,
+        type: 'dm',
+        members: [userId, bc.id],
+        isBotChannel: true,
+        botId: bc.id,
+        icon: Bot,
+      }));
+      
+      setUsers(prevUsers => {
+        const nonUserBots = prevUsers.filter(u => !u.isBot || u.uid === DEFAULT_AI_BOT_USER_ID); // Keep non-bots and default bot
+        return [...nonUserBots, ...botUsers.filter(bu => !nonUserBots.find(u => u.uid === bu.uid))];
+      });
+      setDirectMessages(prevDms => {
+        // Filter out DMs related to bots that might no longer exist for this user, then add new ones
+        const existingUserDms = prevDms.filter(dm => !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId)));
+        return [...existingUserDms, ...botDMs];
+      });
+
+    } catch (error) {
+      console.error("Failed to load user bots:", error);
+      toast({ title: "Error Loading Bots", description: "Could not fetch your custom bot configurations.", variant: "destructive" });
+    } finally {
+      setIsLoadingUserBots(false);
+    }
+  }, [toast]);
+
   // Firebase Auth State Listener
   useEffect(() => {
     setIsLoadingAuth(true);
@@ -99,7 +146,7 @@ export default function ShapeTalkPage() {
       if (firebaseUser) {
         const appUser: User = {
           uid: firebaseUser.uid,
-          name: firebaseUser.displayName || firebaseUser.email || 'Anonymous User', // Use email if display name is null
+          name: firebaseUser.displayName || firebaseUser.email || 'Anonymous User',
           avatarUrl: firebaseUser.photoURL,
           email: firebaseUser.email,
           isBot: false,
@@ -110,21 +157,26 @@ export default function ShapeTalkPage() {
           if (existingUser) {
             return prevUsers.map(u => u.uid === appUser.uid ? appUser : u);
           }
-          return [...prevUsers.filter(u => u.isBot), appUser]; // Keep bots, add/update Firebase user
+          // Keep default bot, remove other bots (they'll be re-added by loadUserBots)
+          return [...prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID || !u.isBot), appUser];
         });
+        
+        loadUserBots(firebaseUser.uid); // Load user-specific bots
 
         if (!activeChannelId && channels.length > 0) {
           setActiveChannelId(channels[0].id);
         }
-        setAuthError(null); // Clear any previous auth errors
+        setAuthError(null);
       } else {
         setCurrentUser(null);
-        setUsers(prevUsers => prevUsers.filter(u => u.isBot)); // Keep only bot users if logged out
+        setUsers(prevUsers => prevUsers.filter(u => u.uid === DEFAULT_AI_BOT_USER_ID)); // Keep only default bot
+        setUserBots([]); // Clear user-specific bots
+        setDirectMessages([]); // Clear DMs related to user bots
         setActiveChannelId(null); 
       }
     });
     return () => unsubscribe();
-  }, [activeChannelId, channels]);
+  }, [activeChannelId, channels, loadUserBots]);
 
   const handleFirebaseAuthError = (error: any, actionType: "Login" | "Sign Up") => {
     console.error(`${actionType} error:`, error);
@@ -164,7 +216,7 @@ export default function ShapeTalkPage() {
           description = error.message;
         }
     }
-    setAuthError(description); // Display error on form
+    setAuthError(description); 
     toast({ title, description, variant: "destructive", duration: 7000 });
   };
 
@@ -210,7 +262,6 @@ export default function ShapeTalkPage() {
     setAuthError(null);
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      // onAuthStateChanged will handle setting the current user
       toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Sign Up");
@@ -269,7 +320,7 @@ export default function ShapeTalkPage() {
     const newMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       channelId,
-      userId: currentUser.uid, // Use Firebase UID
+      userId: currentUser.uid, 
       content,
       timestamp: Date.now(),
     };
@@ -289,11 +340,11 @@ export default function ShapeTalkPage() {
           botApiKeyToUse = userBotConfig.apiKey;
           botShapeUsernameToUse = userBotConfig.shapeUsername;
         } else {
-          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the configuration for this bot.", "text");
+          // This case should ideally not happen if states are synced correctly
+          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the configuration for this bot. It might have been removed.", "text");
           return;
         }
-      } else {
-        // Using default bot
+      } else { // Using default bot
         if (!isApiHealthy) {
           sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm currently unable to connect to my services. Please check the API status or try again later.", "text");
           return;
@@ -311,10 +362,10 @@ export default function ShapeTalkPage() {
         const aiResponse = await chatWithShape({
           promptText: content.text,
           contextShapeId: contextShapeForBot.id, 
-          userId: currentUser.uid, // Firebase UID of the interacting user
+          userId: currentUser.uid, 
           channelId: channelId,
-          botApiKey: botApiKeyToUse,
-          botShapeUsername: botShapeUsernameToUse,   
+          botApiKey: botApiKeyToUse, // Will be undefined for default bot, using env vars
+          botShapeUsername: botShapeUsernameToUse, // Will be undefined for default bot, using env vars
         });
         
         sendBotMessageUtil(channelId, botUserIdToUse, aiResponse.responseText, "ai_response", content.text, contextShapeForBot.id);
@@ -387,12 +438,10 @@ export default function ShapeTalkPage() {
     }
   };
 
-  const handleAddBot = (botConfig: BotConfig) => {
-    if (!currentUser) {
-        toast({title: "Login Required", description: "Please login to add a bot.", variant: "destructive"});
-        return;
-    }
-    
+  // This function is called by CreateBotDialog after successful Firestore save
+  const handleBotCreatedLocally = (botConfig: BotConfig) => {
+    if (!currentUser) return; // Should not happen if dialog was opened by logged-in user
+
     setUserBots(prev => [...prev, botConfig]);
 
     const botUser: User = {
@@ -420,7 +469,6 @@ export default function ShapeTalkPage() {
     };
     setDirectMessages(prev => [...prev, newDmChannel]);
     setActiveChannelId(newDmChannel.id); 
-    toast({ title: "Bot Added", description: `You can now chat with ${botConfig.name}.` });
   };
 
   const activeChannelDetails = currentUser ? [...channels, ...directMessages].find(c => c.id === activeChannelId) || null : null;
@@ -518,6 +566,7 @@ export default function ShapeTalkPage() {
           onAddChannel={handleAddChannel}
           onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
           onLogout={handleLogout}
+          isLoadingUserBots={isLoadingUserBots}
         />
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
           <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
@@ -539,12 +588,10 @@ export default function ShapeTalkPage() {
         <CreateBotDialog
           isOpen={isCreateBotDialogOpen}
           onOpenChange={setIsCreateBotDialogOpen}
-          onBotCreated={handleAddBot}
-          currentUserId={currentUser.uid} // Pass Firebase UID
+          onBotCreated={handleBotCreatedLocally} // Use the local handler
+          currentUserId={currentUser.uid} 
         />
       )}
     </SidebarProvider>
   );
 }
-
-    

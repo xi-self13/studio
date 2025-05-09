@@ -12,7 +12,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
-  SidebarTrigger, // Added back
+  SidebarTrigger, 
+  SidebarMenuSkeleton, // Import skeleton
 } from '@/components/ui/sidebar';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -32,6 +33,7 @@ interface SidebarNavProps {
   onAddChannel: () => void;
   onOpenCreateBotDialog: () => void;
   onLogout: () => void; 
+  isLoadingUserBots?: boolean; // Added prop
 }
 
 export function AppSidebar({
@@ -44,6 +46,7 @@ export function AppSidebar({
   onAddChannel,
   onOpenCreateBotDialog,
   onLogout, 
+  isLoadingUserBots = false, // Default to false
 }: SidebarNavProps) {
 
   return (
@@ -95,7 +98,13 @@ export function AppSidebar({
                <span className="flex items-center gap-2"><Users size={16} /> Direct Messages</span>
             </SidebarGroupLabel>
             <SidebarMenu>
-              {directMessages.map((dm) => (
+              {isLoadingUserBots && currentUser && (
+                <>
+                  <SidebarMenuItem><SidebarMenuSkeleton showIcon /></SidebarMenuItem>
+                  <SidebarMenuItem><SidebarMenuSkeleton showIcon /></SidebarMenuItem>
+                </>
+              )}
+              {!isLoadingUserBots && directMessages.map((dm) => (
                 <SidebarMenuItem key={dm.id}>
                   <SidebarMenuButton
                     onClick={() => onSelectChannel(dm.id)}
@@ -114,7 +123,7 @@ export function AppSidebar({
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {directMessages.length === 0 && currentUser && ( 
+              {!isLoadingUserBots && directMessages.length === 0 && currentUser && ( 
                  <SidebarMenuItem>
                   <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">No DMs yet.</span>
                   <span className="px-2 py-1.5 text-xs text-muted-foreground group-data-[collapsible=icon]:[&:not(:hover)]:hidden hidden">No DMs.</span>

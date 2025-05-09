@@ -27,6 +27,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Cpu, Loader2 } from 'lucide-react';
+import { saveUserBotConfigToFirestore } from '@/lib/firestoreService'; // Import Firestore service
 
 const formSchema = z.object({
   name: z.string().min(2, 'Bot name must be at least 2 characters.').max(50, 'Bot name must be 50 characters or less.'),
@@ -77,13 +78,15 @@ export function CreateBotDialog({
         // avatarUrl: can be added later or use a default
       };
 
-      onBotCreated(newBotConfig);
+      await saveUserBotConfigToFirestore(newBotConfig); // Save to Firestore
+      
+      onBotCreated(newBotConfig); // Update local state
       toast({ title: "Bot Created!", description: `${data.name} is ready to chat.` });
       form.reset();
       onOpenChange(false);
     } catch (error) {
       console.error("Error creating bot:", error);
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred while saving the bot.";
       toast({
         title: "Error Creating Bot",
         description: errorMessage,
