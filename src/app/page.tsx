@@ -86,6 +86,7 @@ export default function ShapeTalkPage() {
 
   // Firebase Auth State Listener
   useEffect(() => {
+    setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
       setIsLoadingAuth(false);
       if (firebaseUser) {
@@ -123,9 +124,18 @@ export default function ShapeTalkPage() {
     try {
       await signInWithPopup(auth, provider);
       toast({ title: "Logged In", description: "Welcome!" });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
-      toast({ title: "Login Failed", description: (error as Error).message, variant: "destructive" });
+      let description = "An unknown error occurred during login.";
+      if (error.code === 'auth/unauthorized-domain') {
+        description = "This domain is not authorized for Firebase Authentication. Please add it to your Firebase project's 'Authorized domains' list in Authentication -> Sign-in method settings (e.g., localhost).";
+      } else if (error.code === 'auth/invalid-api-key') {
+        description = "Invalid Firebase API Key. Please check your Firebase project configuration and environment variables.";
+      } else if (error.message) {
+        description = error.message;
+      }
+      toast({ title: "Login Failed", description, variant: "destructive", duration: 10000 });
+    } finally {
       setIsLoadingAuth(false);
     }
   };
@@ -134,9 +144,13 @@ export default function ShapeTalkPage() {
     try {
       await signOut(auth);
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Logout error:", error);
-      toast({ title: "Logout Failed", description: (error as Error).message, variant: "destructive" });
+      let description = "An unknown error occurred during logout.";
+      if (error.message) {
+        description = error.message;
+      }
+      toast({ title: "Logout Failed", description, variant: "destructive" });
     }
   };
 
@@ -328,7 +342,7 @@ export default function ShapeTalkPage() {
 
   const activeChannelDetails = currentUser ? [...channels, ...directMessages].find(c => c.id === activeChannelId) || null : null;
 
-  if (isLoadingAuth) {
+  if (isLoadingAuth && !currentUser) { // Show loading only if no user yet and still loading
     return (
       <div className="flex flex-col items-center justify-center h-screen bg-background text-foreground">
         <ShapeTalkLogo className="w-24 h-24 text-primary mb-6 animate-pulse" />
@@ -343,8 +357,9 @@ export default function ShapeTalkPage() {
         <ShapeTalkLogo className="w-24 h-24 text-primary mb-6" />
         <h1 className="text-3xl font-semibold mb-2">Welcome to ShapeTalk</h1>
         <p className="text-muted-foreground mb-8">Chat with AI, discuss shapes, and connect.</p>
-        <Button onClick={handleLogin} size="lg">
-          <LogIn className="mr-2 h-5 w-5" /> Sign in with Google
+        <Button onClick={handleLogin} size="lg" disabled={isLoadingAuth}>
+          {isLoadingAuth ? <PanelLeft className="mr-2 h-5 w-5 animate-spin" /> : <LogIn className="mr-2 h-5 w-5" />}
+           Sign in with Google
         </Button>
          <footer className="absolute bottom-4 text-xs text-muted-foreground">
             © {new Date().getFullYear()} ShapeTalk. Shapes.inc integration for demo purposes.
@@ -394,3 +409,4 @@ export default function ShapeTalkPage() {
     </SidebarProvider>
   );
 }
+
