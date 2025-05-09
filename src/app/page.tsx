@@ -1,10 +1,11 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
 import type { Channel, Message, User, BotConfig, PlatformShape, BotGroup } from '@/types';
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { ChatView } from '@/components/chat/chat-view';
-import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
+import { SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -268,8 +269,7 @@ export default function ShapeTalkPage() {
       setChannels(prev => {
         const existingGroupChannelIds = new Set(prev.filter(c => c.isBotGroup).map(c => c.id));
         const newGroupChannels = groupChannels.filter(gc => !existingGroupChannelIds.has(gc.id));
-        const nonGroupChannels = prev.filter(c => !c.isBotGroup); // Keep non-group channels
-        // Ensure static channels are also preserved if not already present
+        const nonGroupChannels = prev.filter(c => !c.isBotGroup); 
         const staticChannelIds = new Set(['general', DEFAULT_BOT_CHANNEL_ID, AI_LOUNGE_CHANNEL_ID]);
         const currentStaticChannels = nonGroupChannels.filter(c => staticChannelIds.has(c.id));
         const otherNonGroupChannels = nonGroupChannels.filter(c => !staticChannelIds.has(c.id));
@@ -325,14 +325,12 @@ export default function ShapeTalkPage() {
       await loadUserBots(firebaseUser.uid); 
       await loadUserBotGroups(firebaseUser.uid); 
       setAuthError(null);
-    } else { // User is logged out
+    } else { 
       setCurrentUser(null);
-      // Keep bot users, clear human users except the current non-existent one
       setUsers(prevUsers => prevUsers.filter(u => u.isBot)); 
       setUserBots([]);
       setDirectMessages([]);
       setBotGroups([]);
-      // Reset channels to only static ones that are not bot groups
       setChannels(prevCh => {
           const staticChannelIds = new Set(['general', DEFAULT_BOT_CHANNEL_ID, AI_LOUNGE_CHANNEL_ID]);
           return prevCh.filter(c => staticChannelIds.has(c.id) && !c.isBotGroup);
@@ -349,9 +347,9 @@ export default function ShapeTalkPage() {
     setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, handleAuthStateChangeLogic);
     return () => unsubscribe();
-  }, [auth, handleAuthStateChangeLogic]);
+  }, [handleAuthStateChangeLogic]);
 
-  // Effect to set active channel after login and data loading
+
   useEffect(() => {
     if (currentUser && (channels.length > 0 || directMessages.length > 0)) {
         const allAvailableChannels = [...channels, ...directMessages];
@@ -373,7 +371,7 @@ export default function ShapeTalkPage() {
             else if (anyChannel) setActiveChannelId(anyChannel.id);
         }
     }
-  }, [currentUser, channels, directMessages, activeChannelId, setActiveChannelId]);
+  }, [currentUser, channels, directMessages, activeChannelId]);
 
 
   const handleFirebaseAuthError = (error: any, actionType: "Login" | "Sign Up") => {
@@ -991,9 +989,9 @@ export default function ShapeTalkPage() {
           { !((isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis) && !activeChannelDetails && currentUser) && (
             <>
             <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
-              <SidebarTrigger className="h-8 w-8">
+              <MobileSidebarTrigger className="h-8 w-8">
                   <PanelLeft />
-              </SidebarTrigger>
+              </MobileSidebarTrigger>
             </div>
             <ChatView
               activeChannel={activeChannelDetails}
