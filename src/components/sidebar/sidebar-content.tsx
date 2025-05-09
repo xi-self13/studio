@@ -12,12 +12,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
-  // SidebarTrigger, // Not used here
 } from '@/components/ui/sidebar';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AtSign, Hash, Settings, Users, Bot, PlusCircle, LogIn } from 'lucide-react'; // Removed Cpu
+import { AtSign, Hash, Settings, Users, Bot, PlusCircle, LogIn, Cpu } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface SidebarNavProps {
@@ -28,7 +27,8 @@ interface SidebarNavProps {
   onSelectChannel: (channelId: string) => void;
   onOpenSettings: () => void;
   onAddChannel: () => void;
-  // onOpenCreateBotDialog: () => void; // Removed as it's not demonstrated
+  onOpenCreateBotDialog: () => void;
+  onLogin: () => void; 
 }
 
 export function AppSidebar({
@@ -39,7 +39,8 @@ export function AppSidebar({
   onSelectChannel,
   onOpenSettings,
   onAddChannel,
-  // onOpenCreateBotDialog, // Removed
+  onOpenCreateBotDialog,
+  onLogin,
 }: SidebarNavProps) {
 
   return (
@@ -56,9 +57,11 @@ export function AppSidebar({
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
               <span className="flex items-center gap-2"><Hash size={16} /> Channels</span>
-              <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={onAddChannel} aria-label="Add Channel">
-                <PlusCircle size={16} />
-              </Button>
+              {currentUser && (
+                <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={onAddChannel} aria-label="Add Channel">
+                  <PlusCircle size={16} />
+                </Button>
+              )}
             </SidebarGroupLabel>
             <SidebarMenu>
               {channels.map((channel) => (
@@ -68,6 +71,7 @@ export function AppSidebar({
                     isActive={activeChannelId === channel.id}
                     tooltip={channel.name}
                     className="justify-start"
+                    disabled={!currentUser}
                   >
                     {channel.icon ? <channel.icon /> : <Hash />}
                     <span>{channel.name}</span>
@@ -86,9 +90,11 @@ export function AppSidebar({
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
                <span className="flex items-center gap-2"><Users size={16} /> Direct Messages</span>
-                <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => { /* Placeholder for New DM */}} aria-label="New DM">
-                  <PlusCircle size={16} />
-                </Button>
+               {currentUser && (
+                  <Button variant="ghost" size="icon" className="h-6 w-6 group-data-[collapsible=icon]:hidden" onClick={() => { /* Placeholder for New DM */}} aria-label="New DM">
+                    <PlusCircle size={16} />
+                  </Button>
+               )}
             </SidebarGroupLabel>
             <SidebarMenu>
               {directMessages.map((dm) => (
@@ -98,10 +104,11 @@ export function AppSidebar({
                     isActive={activeChannelId === dm.id}
                     tooltip={dm.name}
                     className="justify-start"
+                    disabled={!currentUser}
                   >
                     {dm.isBotChannel ? <Bot className="h-5 w-5" /> : (
                        <Avatar className="h-5 w-5">
-                         <AvatarImage src={`https://picsum.photos/seed/${dm.id}/40/40`} data-ai-hint="profile user" />
+                         <AvatarImage src={`https://picsum.photos/seed/${dm.id}/40/40`} data-ai-hint={dm.isBotChannel ? "bot avatar" : "profile user"} />
                          <AvatarFallback>{dm.name.substring(0, 1).toUpperCase()}</AvatarFallback>
                        </Avatar>
                     )}
@@ -118,8 +125,7 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroup>
 
-           {/* Add Bot Section - removed as per request to not demonstrate this feature */}
-          {/* {currentUser && (
+          {currentUser && (
             <SidebarGroup>
               <SidebarGroupLabel className="flex items-center justify-between">
                 <span className="flex items-center gap-2"><Cpu size={16} /> My Bots</span>
@@ -136,9 +142,7 @@ export function AppSidebar({
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroup>
-          )} */}
-
-
+          )}
         </ScrollArea>
       </SidebarContent>
 
@@ -147,7 +151,7 @@ export function AppSidebar({
           <div className="flex items-center justify-between p-2 rounded-md hover:bg-sidebar-accent">
             <div className="flex items-center gap-2 group-data-[collapsible=icon]:hidden">
               <Avatar className="h-8 w-8">
-                <AvatarImage src={currentUser.avatarUrl} data-ai-hint="user avatar" />
+                <AvatarImage src={currentUser.avatarUrl} data-ai-hint={currentUser.dataAiHint || "user avatar"} />
                 <AvatarFallback>{currentUser.name.substring(0, 1).toUpperCase()}</AvatarFallback>
               </Avatar>
               <span className="text-sm font-medium text-sidebar-foreground">{currentUser.name}</span>
@@ -159,7 +163,7 @@ export function AppSidebar({
           </div>
         ) : (
           <div className="flex items-center justify-center p-2 group-data-[collapsible=icon]:p-0">
-             <Button variant="ghost" className="w-full group-data-[collapsible=icon]:aspect-square group-data-[collapsible=icon]:p-2" onClick={() => { /* Placeholder for login */ }}>
+             <Button variant="outline" className="w-full group-data-[collapsible=icon]:aspect-square group-data-[collapsible=icon]:p-2" onClick={onLogin}>
                 <LogIn size={18}/>
                 <span className="group-data-[collapsible=icon]:hidden ml-2">Login</span>
              </Button>
@@ -169,3 +173,4 @@ export function AppSidebar({
     </Sidebar>
   );
 }
+

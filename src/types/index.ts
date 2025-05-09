@@ -3,6 +3,7 @@ export interface User {
   name: string;
   avatarUrl?: string; // URL to user's avatar image
   isBot?: boolean; // Flag to indicate if this user is a bot
+  dataAiHint?: string; // Hint for AI image generation (e.g., "user profile", "bot avatar")
 }
 
 export interface Shape {
@@ -50,3 +51,4 @@ export interface BotConfig {
   avatarUrl?: string;
   ownerUserId: string; // ID of the user who created this bot
 }
+

@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 interface MessageItemProps {
   message: Message;
-  sender: User | { id: string, name: string, avatarUrl?: string, isBot?: boolean }; // Allow sender to be a general user object which might be a bot
+  sender: User | { id: string, name: string, avatarUrl?: string, isBot?: boolean, dataAiHint?: string }; 
   isOwnMessage: boolean;
 }
 
@@ -22,11 +22,12 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
   }
 
   const getAvatar = () => {
-    if (sender.isBot) { // Check if the sender is a bot
+    const aiHint = sender.dataAiHint || (sender.isBot ? "bot avatar" : "user profile");
+    if (sender.isBot) { 
       return (
         <Avatar className="h-10 w-10 bg-primary/20">
           {sender.avatarUrl ? (
-            <AvatarImage src={sender.avatarUrl} data-ai-hint="bot avatar" />
+            <AvatarImage src={sender.avatarUrl} data-ai-hint={aiHint} />
           ) : null}
           <AvatarFallback><Bot className="text-primary" /></AvatarFallback>
         </Avatar>
@@ -34,7 +35,7 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
     }
     return (
       <Avatar className="h-10 w-10">
-        <AvatarImage src={sender.avatarUrl} data-ai-hint="user profile" />
+        <AvatarImage src={sender.avatarUrl} data-ai-hint={aiHint} />
         <AvatarFallback>{sender.name.substring(0, 1).toUpperCase()}</AvatarFallback>
       </Avatar>
     );
@@ -101,3 +102,4 @@ export function MessageItem({ message, sender, isOwnMessage }: MessageItemProps)
     </div>
   );
 }
+

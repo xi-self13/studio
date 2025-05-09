@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Message, User, Channel } from '@/types';
 import { MessageItem } from './message-item';
 import { MessageInput } from './message-input';
-import { AiChatDialog } from '@/components/ai/image-generator-dialog'; // This is the "Chat with AI about a Shape" dialog
+import { AiChatDialog } from '@/components/ai/image-generator-dialog'; 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { Hash, Users, AtSign, MessageCircle, Sparkles, Bot } from 'lucide-react'
 
 interface ChatViewProps {
   activeChannel: Channel | null;
-  messages: Message[]; // These should be pre-filtered for the activeChannel
+  messages: Message[]; 
   currentUser: User | null;
   users: User[]; 
   onSendMessage: (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
@@ -22,7 +22,7 @@ interface ChatViewProps {
 
 export function ChatView({ 
   activeChannel, 
-  messages, // Assumed to be pre-filtered
+  messages, 
   currentUser, 
   users,
   onSendMessage,
@@ -30,7 +30,7 @@ export function ChatView({
 }: ChatViewProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const [isAiChatDialogOpen, setIsAiChatDialogOpen] = useState(false); // For the "Chat with AI about a Shape" dialog
+  const [isAiChatDialogOpen, setIsAiChatDialogOpen] = useState(false);
 
   useEffect(() => {
     if (viewportRef.current) {
@@ -38,36 +38,43 @@ export function ChatView({
     }
   }, [messages, activeChannel]);
 
-  const handleOpenAiShapeChatDialog = () => { // Renamed for clarity
+  const handleOpenAiShapeChatDialog = () => { 
     if (!currentUser) {
       console.warn("User not logged in. Cannot open AI Shape Chat dialog.");
+      // Optionally, show a toast to login
       return;
     }
-    if (!activeChannel) {
-        console.warn("No active channel for AI Shape Chat. Response won't be posted.");
-    }
+    // No need to check activeChannel here as the dialog itself can be context-less initially,
+    // and the action of sending the message from dialog will check for activeChannel.
     setIsAiChatDialogOpen(true);
   };
 
-  if (!activeChannel) {
+  if (!activeChannel || !currentUser) { // Ensure currentUser is also checked for main view
     return (
       <div className="flex-1 flex flex-col items-center justify-center bg-background p-4 text-muted-foreground">
         <MessageCircle className="w-16 h-16 mb-4" />
-        <h2 className="text-xl font-semibold">Select a channel to start chatting</h2>
-        <p className="text-sm">Or talk to our AI about shapes!</p>
-         <Button onClick={handleOpenAiShapeChatDialog} className="mt-4" variant="outline" disabled={!currentUser}>
+        <h2 className="text-xl font-semibold">
+          {currentUser ? "Select a channel to start chatting" : "Please login to chat"}
+        </h2>
+        {currentUser && <p className="text-sm">Or talk to our AI about shapes!</p>}
+         <Button 
+            onClick={handleOpenAiShapeChatDialog} 
+            className="mt-4" 
+            variant="outline" 
+            disabled={!currentUser} // Disable if no user
+        >
            <Sparkles className="mr-2 h-4 w-4" /> Chat with AI about a Shape
          </Button>
+         {/* AiChatDialog is still rendered to be controlled, but button to open it is conditional */}
          <AiChatDialog 
             isOpen={isAiChatDialogOpen} 
             onOpenChange={setIsAiChatDialogOpen}
             onAiResponse={async (responseData) => {
-              // This dialog posts to the active channel, so an active channel is needed.
-              // The button is disabled if no active channel. This path should ideally not be hit without one.
-              if (activeChannel?.id) {
+              if (activeChannel?.id && currentUser) { // Ensure active channel & user for sending
                 onSendAiResponseMessage(activeChannel.id, responseData);
               } else {
-                console.warn("AI Shape Chat: Response received but no active channel to post to.");
+                console.warn("AI Shape Chat: Response received but no active channel or user to post to.");
+                // Optionally, show a toast if currentUser is missing.
               }
             }}
             currentUserId={currentUser?.id}
@@ -77,34 +84,32 @@ export function ChatView({
     );
   }
 
-  // Messages are now pre-filtered by the parent (page.tsx)
   const currentChannelMessages = messages;
 
-  const getUserById = (userId: string): User | { id: string, name: string, avatarUrl?: string, isBot?: boolean } => {
+  const getUserById = (userId: string): User | { id: string, name: string, avatarUrl?: string, isBot?: boolean, dataAiHint?: string } => {
     const foundUser = users.find(u => u.id === userId);
     if (foundUser) return foundUser;
-    return { id: userId, name: 'Unknown User', isBot: false }; // Default to not a bot if unknown
+    return { id: userId, name: 'Unknown User', isBot: false, dataAiHint: 'unknown user' }; 
   };
 
   const getChannelIcon = () => {
+    if (!activeChannel) return <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
     if (activeChannel.type === 'dm') {
-      // For DMs, try to find the other user (could be human or bot)
       const otherUserId = activeChannel.members?.find(id => id !== currentUser?.id);
       const otherUser = otherUserId ? users.find(u => u.id === otherUserId) : null;
 
       if (otherUser) {
         return (
           <Avatar className="h-6 w-6 mr-2">
-            <AvatarImage src={otherUser.avatarUrl} data-ai-hint={otherUser.isBot ? "bot avatar" : "profile user"} />
+            <AvatarImage src={otherUser.avatarUrl} data-ai-hint={otherUser.dataAiHint || (otherUser.isBot ? "bot avatar" : "profile user")} />
             <AvatarFallback>
               {otherUser.isBot ? <Bot size={12}/> : otherUser.name.substring(0,1).toUpperCase()}
             </AvatarFallback>
           </Avatar>
         );
       }
-      return <AtSign className="h-5 w-5 mr-2 text-muted-foreground" />; // Fallback for DM
+      return <AtSign className="h-5 w-5 mr-2 text-muted-foreground" />; 
     }
-    // For regular channels or bot channels (like default shapes-ai-chat)
     return activeChannel.icon ? <activeChannel.icon className="h-5 w-5 mr-2 text-muted-foreground" /> : <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
   }
 
@@ -139,16 +144,15 @@ export function ChatView({
       
       <MessageInput 
         onSendMessage={(content) => onSendMessage(activeChannel.id, content)} 
-        onOpenAiChat={handleOpenAiShapeChatDialog} // This button opens the "Chat with AI about a Shape" dialog
+        onOpenAiChat={handleOpenAiShapeChatDialog}
         disabled={!activeChannel || !currentUser} 
       />
-      {/* AiChatDialog for "Chat with AI about a Shape" */}
       {activeChannel && currentUser && (
         <AiChatDialog 
           isOpen={isAiChatDialogOpen} 
           onOpenChange={setIsAiChatDialogOpen}
           onAiResponse={(responseData) => {
-              if (activeChannel?.id) { // Ensure activeChannel is still valid
+              if (activeChannel?.id) { 
                    onSendAiResponseMessage(activeChannel.id, responseData);
               } else {
                   console.warn("AI Shape Chat dialog: No active channel ID to send response.");
@@ -161,3 +165,4 @@ export function ChatView({
     </div>
   );
 }
+
