@@ -11,9 +11,9 @@ import { PanelLeft, Bot } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react'; 
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
-import { PREDEFINED_SHAPES, getShapeById } from '@/lib/shapes';
+import { PREDEFINED_SHAPES } from '@/lib/shapes';
 import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
-import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
+// import { CreateBotDialog } from '@/components/bot/create-bot-dialog'; // Not demonstrated for now
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; // For the default bot using env vars
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; // User ID for the default bot
@@ -25,10 +25,10 @@ export default function ShapeTalkPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
-  const [userBots, setUserBots] = useState<BotConfig[]>([]); // For user-created bots
+  const [userBots, setUserBots] = useState<BotConfig[]>([]); // For user-created bots, kept for potential future use
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
   const [hasSentInitialBotMessageForChannel, setHasSentInitialBotMessageForChannel] = useState<Record<string, boolean>>({});
-  const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false);
+  // const [isCreateBotDialogOpen, setIsCreateBotDialogOpen] = useState(false); // Not demonstrated for now
 
 
   const { toast } = useToast();
@@ -48,7 +48,7 @@ export default function ShapeTalkPage() {
   useEffect(() => {
     const initializeApp = async () => {
       const fetchedUser: User = {
-        id: `user_${Date.now()}`, 
+        id: `user_${Date.now()}_${Math.random().toString(36).substring(2,9)}`, 
         name: 'Demo User',
         avatarUrl: 'https://picsum.photos/seed/demouser/40/40',
       };
@@ -214,7 +214,7 @@ export default function ShapeTalkPage() {
     const newChannelName = prompt("Enter new channel name:");
     if (newChannelName) {
       const newChannel: Channel = {
-        id: `channel_${Date.now()}`,
+        id: `channel_${Date.now()}_${Math.random().toString(36).substring(2,9)}`,
         name: newChannelName,
         type: 'channel',
         icon: Hash,
@@ -225,13 +225,13 @@ export default function ShapeTalkPage() {
     }
   };
 
+  // Kept for potential future use, but not actively triggered by UI for now.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleAddBot = (botConfig: BotConfig) => {
-    if (!currentUser) return; // Should not happen if dialog is only shown to logged-in users
+    if (!currentUser) return; 
 
-    // Add to userBots state
     setUserBots(prev => [...prev, botConfig]);
 
-    // Add bot as a "user" for chat display
     const botUser: User = {
       id: botConfig.id,
       name: botConfig.name,
@@ -240,18 +240,17 @@ export default function ShapeTalkPage() {
     };
     setUsers(prev => [...prev, botUser]);
 
-    // Create a new DM channel for this bot
     const newDmChannel: Channel = {
       id: `dm_${botConfig.id}_${currentUser.id}`,
-      name: botConfig.name, // DM channel will be named after the bot
+      name: botConfig.name, 
       type: 'dm',
       members: [currentUser.id, botConfig.id],
       isBotChannel: true,
       botId: botConfig.id,
-      icon: Bot, // Use Bot icon for DM with bot
+      icon: Bot, 
     };
     setDirectMessages(prev => [...prev, newDmChannel]);
-    setActiveChannelId(newDmChannel.id); // Optionally switch to new DM
+    setActiveChannelId(newDmChannel.id); 
     toast({ title: "Bot Added", description: `You can now chat with ${botConfig.name}.` });
   };
 
@@ -268,7 +267,7 @@ export default function ShapeTalkPage() {
           onSelectChannel={handleSelectChannel}
           onOpenSettings={handleOpenSettings}
           onAddChannel={handleAddChannel}
-          onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
+          // onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)} // Not demonstrated for now
         />
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
           <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
@@ -286,14 +285,14 @@ export default function ShapeTalkPage() {
           />
         </SidebarInset>
       </div>
-      {currentUser && (
+      {/* {currentUser && ( // CreateBotDialog not demonstrated for now
         <CreateBotDialog
           isOpen={isCreateBotDialogOpen}
           onOpenChange={setIsCreateBotDialogOpen}
           onBotCreated={handleAddBot}
           currentUserId={currentUser.id}
         />
-      )}
+      )} */}
     </SidebarProvider>
   );
 }

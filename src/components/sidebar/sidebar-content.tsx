@@ -12,12 +12,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarFooter,
-  SidebarTrigger,
+  // SidebarTrigger, // Not used here
 } from '@/components/ui/sidebar';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { AtSign, Hash, MessageCircle, Settings, Users, Bot, PlusCircle, LogIn, Cpu } from 'lucide-react'; // Added Cpu for Add Bot
+import { AtSign, Hash, Settings, Users, Bot, PlusCircle, LogIn } from 'lucide-react'; // Removed Cpu
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface SidebarNavProps {
@@ -28,7 +28,7 @@ interface SidebarNavProps {
   onSelectChannel: (channelId: string) => void;
   onOpenSettings: () => void;
   onAddChannel: () => void;
-  onOpenCreateBotDialog: () => void; // New prop
+  // onOpenCreateBotDialog: () => void; // Removed as it's not demonstrated
 }
 
 export function AppSidebar({
@@ -39,7 +39,7 @@ export function AppSidebar({
   onSelectChannel,
   onOpenSettings,
   onAddChannel,
-  onOpenCreateBotDialog, // New prop
+  // onOpenCreateBotDialog, // Removed
 }: SidebarNavProps) {
 
   return (
@@ -118,8 +118,8 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroup>
 
-           {/* Add Bot Section - only if user is logged in */}
-          {currentUser && (
+           {/* Add Bot Section - removed as per request to not demonstrate this feature */}
+          {/* {currentUser && (
             <SidebarGroup>
               <SidebarGroupLabel className="flex items-center justify-between">
                 <span className="flex items-center gap-2"><Cpu size={16} /> My Bots</span>
@@ -128,7 +128,6 @@ export function AppSidebar({
                 </Button>
               </SidebarGroupLabel>
               <SidebarMenu>
-                {/* Placeholder if no bots, or could list user's bots here if not handled by DMs */}
                  <SidebarMenuItem>
                     <SidebarMenuButton onClick={onOpenCreateBotDialog} tooltip="Create a new AI Bot" className="justify-start group-data-[collapsible=icon]:justify-center">
                         <Cpu />
@@ -137,7 +136,7 @@ export function AppSidebar({
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroup>
-          )}
+          )} */}
 
 
         </ScrollArea>
