@@ -23,16 +23,21 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
+  FormDescription as FormFieldDescription, // Renamed to avoid conflict with DialogDescription
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Cpu, Loader2 } from 'lucide-react';
-import { saveUserBotConfigToFirestore } from '@/lib/firestoreService'; // Import Firestore service
+import { saveUserBotConfigToFirestore } from '@/lib/firestoreService';
 
 const formSchema = z.object({
   name: z.string().min(2, 'Bot name must be at least 2 characters.').max(50, 'Bot name must be 50 characters or less.'),
   shapeUsername: z.string().min(1, 'Shapes.inc username is required.'),
   apiKey: z.string().min(1, 'Shapes.inc API key is required.'),
+  isPublic: z.boolean().default(false).optional(),
+  avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
 });
 
 type CreateBotFormValues = z.infer<typeof formSchema>;
@@ -41,7 +46,7 @@ interface CreateBotDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   onBotCreated: (botConfig: BotConfig) => void;
-  currentUserId: string; // Firebase UID of the user creating the bot
+  currentUserId: string; 
 }
 
 export function CreateBotDialog({ 
@@ -59,6 +64,8 @@ export function CreateBotDialog({
       name: '',
       shapeUsername: '',
       apiKey: '',
+      isPublic: false,
+      avatarUrl: '',
     },
   });
 
@@ -74,13 +81,15 @@ export function CreateBotDialog({
         name: data.name,
         shapeUsername: data.shapeUsername,
         apiKey: data.apiKey, 
-        ownerUserId: currentUserId, // Store the Firebase UID of the owner
-        // avatarUrl: can be added later or use a default
+        ownerUserId: currentUserId,
+        isPublic: data.isPublic || false,
+        avatarUrl: data.avatarUrl || undefined, // Store undefined if empty string
+        // systemPrompt and greetingMessage will be set via BotSettingsDialog
       };
 
-      await saveUserBotConfigToFirestore(newBotConfig); // Save to Firestore
+      await saveUserBotConfigToFirestore(newBotConfig); 
       
-      onBotCreated(newBotConfig); // Update local state
+      onBotCreated(newBotConfig); 
       toast({ title: "Bot Created!", description: `${data.name} is ready to chat.` });
       form.reset();
       onOpenChange(false);
@@ -109,6 +118,7 @@ export function CreateBotDialog({
           <DialogTitle className="flex items-center gap-2"><Cpu className="text-primary" /> Create Your AI Bot</DialogTitle>
           <DialogDescription>
             Configure your own AI bot using its Shapes.inc username and API key.
+            Public bots will be discoverable by others.
             <strong className="block mt-1 text-destructive-foreground/80">Note: API keys are sensitive. This is for demonstration. In a real app, handle keys securely.</strong>
           </DialogDescription>
         </DialogHeader>
@@ -150,6 +160,42 @@ export function CreateBotDialog({
                     <Input type="password" placeholder="your-shapes-api-key" {...field} />
                   </FormControl>
                   <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="avatarUrl"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Avatar URL (Optional)</FormLabel>
+                  <FormControl>
+                    <Input type="url" placeholder="https://example.com/avatar.png" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="isPublic"
+              render={({ field }) => (
+                <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 shadow">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <Label htmlFor="isPublic" className="font-medium">
+                      Make Bot Public
+                    </Label>
+                    <FormFieldDescription className="text-xs">
+                      If checked, other users will be able to see and interact with this bot in public listings.
+                    </FormFieldDescription>
+                  </div>
+                   <FormMessage />
                 </FormItem>
               )}
             />

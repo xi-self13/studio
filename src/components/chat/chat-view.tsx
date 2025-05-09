@@ -1,32 +1,51 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
-import type { Message, User, Channel } from '@/types';
+import type { Message, User, Channel, BotConfig } from '@/types';
 import { MessageItem } from './message-item';
 import { MessageInput } from './message-input';
-import { AiChatDialog } from '@/components/ai/image-generator-dialog'; 
+import { AiChatDialog } from '@/components/ai/image-generator-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from '@/components/ui/button';
-import { Hash, Users, AtSign, MessageCircle, Sparkles, Bot } from 'lucide-react'; 
+import { Hash, Users, AtSign, MessageCircle, Sparkles, Bot, Settings, Trash2, Users2 as BotGroupsIcon } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+
 
 interface ChatViewProps {
   activeChannel: Channel | null;
-  messages: Message[]; 
-  currentUser: User | null; // This is now the Firebase User object (or our app's User type derived from it)
-  users: User[]; 
+  messages: Message[];
+  currentUser: User | null;
+  users: User[];
+  userBots: BotConfig[];
   onSendMessage: (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => Promise<void>;
   onSendAiResponseMessage: (channelId: string, responseData: { textResponse: string; prompt: string; sourceShapeId: string }) => Promise<void>;
+  onOpenBotSettings: (botId: string) => void;
+  onDeleteBot: (botId: string) => Promise<void>; 
+  onOpenManageGroupDialog?: (groupId: string) => void; 
 }
 
-export function ChatView({ 
-  activeChannel, 
-  messages, 
-  currentUser, 
+export function ChatView({
+  activeChannel,
+  messages,
+  currentUser,
   users,
+  userBots,
   onSendMessage,
-  onSendAiResponseMessage
+  onSendAiResponseMessage,
+  onOpenBotSettings,
+  onDeleteBot,
+  onOpenManageGroupDialog,
 }: ChatViewProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -38,10 +57,9 @@ export function ChatView({
     }
   }, [messages, activeChannel]);
 
-  const handleOpenAiShapeChatDialog = () => { 
+  const handleOpenAiShapeChatDialog = () => {
     if (!currentUser) {
       console.warn("User not logged in. Cannot open AI Shape Chat dialog.");
-      // Optionally, show a toast to login
       return;
     }
     setIsAiChatDialogOpen(true);
@@ -55,40 +73,23 @@ export function ChatView({
           {currentUser ? "Select a channel to start chatting" : "Please login to chat"}
         </h2>
         {currentUser && <p className="text-sm">Or talk to our AI about shapes!</p>}
-         <Button 
-            onClick={handleOpenAiShapeChatDialog} 
-            className="mt-4" 
-            variant="outline" 
-            disabled={!currentUser} // Disable if no current user
+         <Button
+            onClick={handleOpenAiShapeChatDialog}
+            className="mt-4"
+            variant="outline"
+            disabled={!currentUser}
         >
            <Sparkles className="mr-2 h-4 w-4" /> Chat with AI about a Shape
          </Button>
-         {currentUser && activeChannel && ( // Only render dialog if user and channel potentially exist
-            <AiChatDialog 
-                isOpen={isAiChatDialogOpen} 
+         {currentUser && ( 
+            <AiChatDialog
+                isOpen={isAiChatDialogOpen}
                 onOpenChange={setIsAiChatDialogOpen}
                 onAiResponse={async (responseData) => {
-                  if (activeChannel?.id && currentUser) { // Redundant check but safe
-                    onSendAiResponseMessage(activeChannel.id, responseData);
-                  } else {
-                    console.warn("AI Shape Chat: Response received but no active channel or user to post to.");
-                  }
+                  onSendAiResponseMessage(activeChannel?.id || "placeholder_channel", responseData);
                 }}
-                currentUserId={currentUser?.uid} // Pass Firebase UID
-                activeChannelId={activeChannel?.id || null} 
-            />
-         )}
-         {/* Fallback if no active channel for the dialog when button is clicked from this view */}
-         {!activeChannel && currentUser && (
-             <AiChatDialog 
-                isOpen={isAiChatDialogOpen} 
-                onOpenChange={setIsAiChatDialogOpen}
-                onAiResponse={async (responseData) => {
-                    // This case might need a default channel or user notification
-                    console.warn("AI Shape Chat: Response received but no active channel to post to from this context.");
-                }}
-                currentUserId={currentUser?.uid} // Pass Firebase UID
-                activeChannelId={null} // No active channel in this specific view state
+                currentUserId={currentUser?.uid}
+                activeChannelId={activeChannel?.id || null}
             />
          )}
       </div>
@@ -100,14 +101,18 @@ export function ChatView({
   const getUserById = (userId: string): User | { uid: string, name: string, avatarUrl?: string | null, isBot?: boolean, dataAiHint?: string } => {
     const foundUser = users.find(u => u.uid === userId);
     if (foundUser) return foundUser;
-    return { uid: userId, name: 'Unknown User', isBot: false, dataAiHint: 'unknown user', avatarUrl: null }; 
+    const foundBotConfig = userBots.find(b => b.id === userId);
+    if (foundBotConfig) return { uid: userId, name: foundBotConfig.name, avatarUrl: foundBotConfig.avatarUrl, isBot: true, dataAiHint: 'bot avatar'};
+    return { uid: userId, name: 'Unknown User', isBot: false, dataAiHint: 'unknown user', avatarUrl: null };
   };
 
   const getChannelIcon = () => {
     if (!activeChannel) return <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
     if (activeChannel.type === 'dm') {
       const otherUserId = activeChannel.members?.find(id => id !== currentUser?.uid);
-      const otherUser = otherUserId ? users.find(u => u.uid === otherUserId) : null;
+      // Ensure users array is populated before trying to find otherUser
+      const otherUser = otherUserId && users.length > 0 ? users.find(u => u.uid === otherUserId) : null;
+
 
       if (otherUser) {
         return (
@@ -119,16 +124,84 @@ export function ChatView({
           </Avatar>
         );
       }
-      return <AtSign className="h-5 w-5 mr-2 text-muted-foreground" />; 
+      return <AtSign className="h-5 w-5 mr-2 text-muted-foreground" />;
+    }
+    if (activeChannel.isBotGroup) {
+      return <BotGroupsIcon className="h-5 w-5 mr-2 text-muted-foreground" />;
     }
     return activeChannel.icon ? <activeChannel.icon className="h-5 w-5 mr-2 text-muted-foreground" /> : <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
-  }
+  };
+
+  const isOwnBotChannel = activeChannel.isBotChannel &&
+                          activeChannel.botId &&
+                          userBots.some(bot => bot.id === activeChannel.botId && bot.ownerUserId === currentUser.uid);
+
+  const isOwnBotGroupChannel = activeChannel.isBotGroup && activeChannel.groupId && onOpenManageGroupDialog;
 
   return (
     <div className="flex-1 flex flex-col bg-background h-full max-h-screen">
-      <header className="p-4 border-b border-border flex items-center sticky top-0 bg-background z-10">
-        {getChannelIcon()}
-        <h2 className="text-lg font-semibold text-foreground">{activeChannel.name}</h2>
+      <header className="p-4 border-b border-border flex items-center justify-between sticky top-0 bg-background z-10">
+        <div className="flex items-center">
+          {getChannelIcon()}
+          <h2 className="text-lg font-semibold text-foreground">{activeChannel.name}</h2>
+        </div>
+        <div className="flex items-center gap-2">
+          {isOwnBotChannel && activeChannel.botId && (
+            <>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenBotSettings(activeChannel.botId!)}
+                aria-label="Bot Settings"
+                className="text-muted-foreground hover:text-primary"
+              >
+                <Settings size={20} />
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="Delete Bot"
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 size={20} />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This action will permanently delete the bot &quot;{activeChannel.name}&quot;. This cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={async () => {
+                        if (activeChannel.botId) await onDeleteBot(activeChannel.botId)
+                      }}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Delete Bot
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )}
+          {isOwnBotGroupChannel && activeChannel.groupId && onOpenManageGroupDialog && (
+             <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => onOpenManageGroupDialog(activeChannel.groupId!)}
+                aria-label="Manage Group Settings"
+                className="text-muted-foreground hover:text-primary"
+              >
+                <Settings size={20} />
+              </Button>
+          )}
+        </div>
       </header>
 
       <ScrollArea className="flex-1" viewportRef={viewportRef} ref={scrollAreaRef}>
@@ -140,39 +213,38 @@ export function ChatView({
             </div>
           )}
           {currentChannelMessages.map(msg => {
-            const sender = getUserById(msg.userId); 
+            const sender = getUserById(msg.userId);
             return (
-              <MessageItem 
-                key={msg.id} 
-                message={msg} 
+              <MessageItem
+                key={msg.id}
+                message={msg}
                 sender={sender}
-                isOwnMessage={currentUser ? msg.userId === currentUser.uid : false} // Use Firebase UID for comparison
+                isOwnMessage={currentUser ? msg.userId === currentUser.uid : false}
               />
             );
           })}
         </div>
       </ScrollArea>
-      
-      <MessageInput 
-        onSendMessage={(content) => onSendMessage(activeChannel.id, content)} 
+
+      <MessageInput
+        onSendMessage={(content) => onSendMessage(activeChannel.id, content)}
         onOpenAiChat={handleOpenAiShapeChatDialog}
-        disabled={!activeChannel || !currentUser} 
+        disabled={!activeChannel || !currentUser}
       />
       {activeChannel && currentUser && (
-        <AiChatDialog 
-          isOpen={isAiChatDialogOpen} 
+        <AiChatDialog
+          isOpen={isAiChatDialogOpen}
           onOpenChange={setIsAiChatDialogOpen}
           onAiResponse={(responseData) => {
-              if (activeChannel?.id) { 
+              if (activeChannel?.id) {
                    onSendAiResponseMessage(activeChannel.id, responseData);
-              } else {
-                  console.warn("AI Shape Chat dialog: No active channel ID to send response.");
               }
           }}
-          currentUserId={currentUser?.uid} // Pass Firebase UID
+          currentUserId={currentUser?.uid}
           activeChannelId={activeChannel?.id || null}
         />
       )}
     </div>
   );
 }
+

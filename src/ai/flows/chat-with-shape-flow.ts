@@ -17,8 +17,9 @@ import { getShapeById } from '@/lib/shapes';
 const ChatWithShapeInputSchema = z.object({
   promptText: z.string().describe('The user message to send to the Shape.'),
   contextShapeId: z.string().describe('The ID of the predefined shape used as context for the conversation.'),
-  userId: z.string().describe('The Firebase UID of the user initiating the chat.'), // Updated description
+  userId: z.string().describe('The Firebase UID of the user initiating the chat.'),
   channelId: z.string().describe('The ID of the channel where the chat is happening.'),
+  systemPrompt: z.string().optional().describe('An optional system prompt to guide the bot\'s personality or behavior.'), // New field
   // Optional: For user-created bots
   botApiKey: z.string().optional().describe('The API key for the specific bot, if not using default.'),
   botShapeUsername: z.string().optional().describe('The Shape username for the specific bot, if not using default.'),
@@ -40,9 +41,8 @@ export async function chatWithShape(
     throw new Error(`Invalid input: ${parseResult.error.message}`);
   }
 
-  const { promptText, contextShapeId, userId, channelId, botApiKey, botShapeUsername } = input;
+  const { promptText, contextShapeId, userId, channelId, systemPrompt, botApiKey, botShapeUsername } = input;
 
-  // Use provided bot credentials or fallback to environment variables for the default bot
   const apiKeyToUse = botApiKey || process.env.SHAPESINC_API_KEY;
   const shapeUsernameToUse = botShapeUsername || process.env.SHAPESINC_SHAPE_USERNAME;
 
@@ -55,8 +55,27 @@ export async function chatWithShape(
   const selectedShape = getShapeById(contextShapeId);
   const shapeNameForContext = selectedShape?.name || 'the selected concept';
 
-  // Construct a message that includes context about the shape
-  const userMessageContent = `The user is interacting with the concept of a "${shapeNameForContext}". Their message is: "${promptText}"`;
+  // Construct messages array
+  // Shapes API typically uses the last user message. System prompt isn't directly supported via a "system" role in the same way as OpenAI.
+  // Instead, it's usually part of the Shape's configuration on Shapes.inc.
+  // If a systemPrompt is provided here, we might prepend it to the user's message or log a warning that it's not natively used by Shapes API in message array.
+  // For now, we will prepend it to the user message content if provided.
+  // However, the Shapes API documentation states: "System/developer role message - (these are already part of the shape settings)"
+  // "Essentially, we ignore all other messages except the last role=”user” message in the request."
+  // This means sending a separate system message in the array might be ignored.
+  // The best way to use `systemPrompt` with Shapes.inc API, if it's not part of the persisted Shape config,
+  // would be to incorporate its essence into the user's message or rely on the Shape's pre-configuration.
+
+  let userMessageContent = `The user is interacting with the concept of a "${shapeNameForContext}". Their message is: "${promptText}"`;
+  if (systemPrompt) {
+     // Prepending the system prompt to the user's content, as Shapes API focuses on the last user message.
+     // This is a workaround as Shapes API doesn't use a "system" role message in the array.
+    userMessageContent = `${systemPrompt}\n\nRegarding the concept of a "${shapeNameForContext}", the user's message is: "${promptText}"`;
+    // Or, if the API might respect it (though docs say otherwise):
+    // messages.unshift({ role: 'system', content: systemPrompt });
+  }
+  
+  const messagesPayload = [{ role: 'user', content: userMessageContent }];
 
   try {
     const response = await fetch('https://api.shapes.inc/v1/chat/completions', {
@@ -64,12 +83,12 @@ export async function chatWithShape(
       headers: {
         'Authorization': `Bearer ${apiKeyToUse}`,
         'Content-Type': 'application/json',
-        'X-User-Id': userId, // This should be the Firebase UID of the human user
+        'X-User-Id': userId, 
         'X-Channel-Id': channelId,
       },
       body: JSON.stringify({
         model: `shapesinc/${shapeUsernameToUse}`,
-        messages: [{ role: 'user', content: userMessageContent }],
+        messages: messagesPayload,
       }),
     });
 
@@ -82,7 +101,6 @@ export async function chatWithShape(
     }
 
     const responseData = await response.json();
-    
     const aiMessage = responseData.choices?.[0]?.message?.content;
 
     if (typeof aiMessage !== 'string') {

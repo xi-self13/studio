@@ -34,34 +34,52 @@ export interface Message {
 }
 
 export interface Channel {
-  id: string;
+  id: string; 
   name: string;
-  type: 'channel' | 'dm';
-  members?: string[]; // list of user uids (Firebase UIDs for users, bot IDs for bots)
+  type: 'channel' | 'dm' | 'group';
+  members?: string[]; 
   unreadCount?: number;
   icon?: React.ElementType; 
   isBotChannel?: boolean; 
   botId?: string; 
-  isAiLounge?: boolean; // New flag for AI Lounge channel
+  isAiLounge?: boolean; 
+  isBotGroup?: boolean; 
+  groupId?: string; 
 }
 
 // Configuration for a user-created bot
 export interface BotConfig {
-  id: string; // Unique ID for the bot, will also be its user ID (uid)
+  id: string; 
   name: string;
   shapeUsername: string; 
   apiKey: string; 
   avatarUrl?: string;
-  ownerUserId: string; // Firebase UID of the user who created this bot
+  ownerUserId: string; 
+  isPublic?: boolean; 
+  systemPrompt?: string; 
+  greetingMessage?: string; 
 }
 
-// Configuration for a platform-available AI model/shape
+// Configuration for a platform-available AI model/shape or a public user bot
 export interface PlatformShape {
-  id: string; // Unique ID for this platform shape entry (e.g., 'platform-genius-bot')
-  name: string; // Display name (e.g., "Genius Bot")
+  id: string; 
+  name: string; 
   description: string;
   avatarUrl?: string;
   dataAiHint?: string;
-  shapeUsername: string; // The specific Shapes.inc username for this model
+  shapeUsername: string; 
   tags?: string[];
+  isUserCreated?: boolean; 
+  ownerDisplayName?: string; 
+}
+
+// Configuration for a group of bots
+export interface BotGroup {
+  id: string;
+  name: string;
+  ownerUserId: string; // Firebase UID of the user who created and owns this group
+  description?: string;
+  avatarUrl?: string;
+  botIds: string[];      // Array of BotConfig IDs that are members of this group
+  memberUserIds: string[]; // Array of User UIDs (besides owner) who are members of this group (future use for multi-user groups)
 }

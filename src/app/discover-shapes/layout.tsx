@@ -2,26 +2,29 @@
 // src/app/discover-shapes/layout.tsx
 "use client"; 
 
-// This layout is minimal because the main sidebar and global structure are handled by the root layout
-// and the page.tsx in the main app.
-// If /discover-shapes needed its own specific sidebar or header distinct from the main chat app,
-// this layout would be more complex. For now, it just renders children.
-
-import { SidebarProvider } from '@/components/ui/sidebar'; // if sidebar context is needed
-import { AppSidebar } from '@/components/sidebar/sidebar-content'; // if we want to reuse main sidebar
-import { useState, useEffect } from 'react';
+import { SidebarProvider } from '@/components/ui/sidebar';
+import { AppSidebar } from '@/components/sidebar/sidebar-content';
+import { useState, useEffect, useCallback } from 'react';
 import { auth } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
-import { onAuthStateChanged } from 'firebase/auth'; // Added import
-import type { User, Channel } from '@/types'; // Adjust imports as needed
-import { useRouter } from 'next/navigation'; // For redirecting if not logged in
+import { onAuthStateChanged } from 'firebase/auth';
+import type { User, Channel, BotConfig } from '@/types';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { getUserBotConfigsFromFirestore } from '@/lib/firestoreService';
+import { Bot, Hash, Cpu } from 'lucide-react'; // For channel icons
 
+// Define static channels similar to page.tsx for consistency
+const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
+const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; 
+const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global';
 
-// Dummy props for AppSidebar if it were to be used here directly
-// In a real scenario, these would come from a shared context or be fetched.
-const dummyChannels: Channel[] = [];
-const dummyDirectMessages: Channel[] = [];
+const staticChannels: Channel[] = [
+  { id: 'general', name: 'general', type: 'channel', icon: Hash },
+  { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'channel', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID },
+  { id: AI_LOUNGE_CHANNEL_ID, name: 'AI Lounge', type: 'channel', icon: Cpu, isAiLounge: true },
+];
+
 
 export default function DiscoverShapesLayout({
   children,
@@ -29,70 +32,86 @@ export default function DiscoverShapesLayout({
   children: React.ReactNode;
 }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [userDirectMessages, setUserDirectMessages] = useState<Channel[]>([]);
+  const [isLoadingAuth, setIsLoadingAuth] = useState(true);
+  const [isLoadingDMs, setIsLoadingDMs] = useState(false);
   const router = useRouter();
 
+  const loadUserDMs = useCallback(async (userId: string) => {
+    setIsLoadingDMs(true);
+    try {
+      const fetchedBotConfigs = await getUserBotConfigsFromFirestore(userId);
+      const botDMs: Channel[] = fetchedBotConfigs.map(bc => ({
+        id: `dm_${bc.id}_${userId}`,
+        name: bc.name,
+        type: 'dm',
+        members: [userId, bc.id],
+        isBotChannel: true,
+        botId: bc.id,
+        icon: Bot,
+      }));
+      setUserDirectMessages(botDMs);
+    } catch (error) {
+      console.error("Failed to load user DMs for discover page:", error);
+      setUserDirectMessages([]); // Set to empty on error
+    } finally {
+      setIsLoadingDMs(false);
+    }
+  }, []);
+
   useEffect(() => {
+    setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
         setCurrentUser({
           uid: firebaseUser.uid,
-          name: firebaseUser.displayName || firebaseUser.email,
+          name: firebaseUser.displayName || firebaseUser.email || 'User',
           avatarUrl: firebaseUser.photoURL,
           email: firebaseUser.email,
           isBot: false,
         });
+        loadUserDMs(firebaseUser.uid);
       } else {
         setCurrentUser(null);
-        // Optionally redirect to login if this page requires authentication
-        // router.push('/'); 
+        setUserDirectMessages([]);
       }
-      setIsLoading(false);
+      setIsLoadingAuth(false);
     });
     return () => unsubscribe();
-  }, [router]);
+  }, [loadUserDMs]); // Removed router from dependencies as loadUserDMs is stable
 
-  if (isLoading) {
+  if (isLoadingAuth) {
     return (
       <div className="flex items-center justify-center h-screen bg-background text-foreground">
-        <p>Loading user...</p>
+        <p>Loading user session...</p>
       </div>
     );
   }
   
-  // If this page requires login, uncomment this block
-  /*
-  if (!currentUser) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background text-foreground">
-        <p>Please <Link href="/" className="text-primary hover:underline">login</Link> to view this page.</p>
-      </div>
-    );
-  }
-  */
-
   return (
-    <SidebarProvider defaultOpen={true}> {/* Assuming sidebar context might be used by children or for consistency */}
+    <SidebarProvider defaultOpen={true}>
       <div className="flex h-screen max-h-screen overflow-hidden bg-background">
-        {/* 
-          Optionally, render the main AppSidebar here if /discover-shapes should also have it.
-          This depends on the desired app structure. If /discover-shapes is meant to be
-          "outside" the main chat interface but still part of the same app shell, include it.
-          If it's a more distinct section, this layout might be simpler or have its own nav.
-        */}
-        {currentUser && ( // Only show sidebar if user is logged in, adjust as needed
+        {currentUser && (
             <AppSidebar
-                channels={dummyChannels} // Pass actual or relevant data if sidebar is used
-                directMessages={dummyDirectMessages}
+                channels={staticChannels} 
+                directMessages={userDirectMessages} 
                 currentUser={currentUser}
-                activeChannelId={null} // No active chat channel on this page
-                onSelectChannel={() => {}}
-                onOpenSettings={() => {}}
-                onAddChannel={() => {}}
-                onOpenCreateBotDialog={() => {}}
-                onLogout={() => auth.signOut()}
-                isLoadingUserBots={false}
+                activeChannelId={null} 
+                onSelectChannel={() => router.push('/')} 
+                onOpenSettings={() => {/* Might open settings, or be disabled/redirect */}}
+                onAddChannel={() => {/* Might be disabled or redirect */}}
+                onOpenCreateBotDialog={() => {/* Might be disabled or redirect */}}
+                onLogout={async () => {
+                  await auth.signOut();
+                  router.push('/'); 
+                }}
+                isLoadingUserBots={isLoadingDMs} 
             />
+        )}
+        {!currentUser && ( 
+            <div className="w-64 bg-sidebar-background border-r border-sidebar-border p-4 text-center text-sidebar-foreground">
+                <p className="text-sm">Please <Link href="/" className="text-primary hover:underline">login</Link> to see channels.</p>
+            </div>
         )}
         <main className="flex-1 overflow-y-auto">
           {children}
@@ -101,4 +120,3 @@ export default function DiscoverShapesLayout({
     </SidebarProvider>
   );
 }
-
