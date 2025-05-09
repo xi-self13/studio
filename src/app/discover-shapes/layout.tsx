@@ -5,14 +5,16 @@
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { AppSidebar } from '@/components/sidebar/sidebar-content';
 import { useState, useEffect, useCallback } from 'react';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase'; // Added db
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore'; // Added getDoc and doc
 import type { User, Channel, BotGroup, Server } from '@/types'; // Added Server
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore, getServersForUserFromFirestore } from '@/lib/firestoreService'; // Added getServersForUserFromFirestore
 import { Bot, Hash, Cpu, Users2 as BotGroupsIcon } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton
 
 // Default global channels (DMs/Groups) - these might not be relevant if discover page has its own minimal sidebar or fixed context
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
@@ -101,7 +103,7 @@ export default function DiscoverShapesLayout({
     setIsLoadingAuth(true);
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
-        const userDocRef = doc(auth.firestore, "users", firebaseUser.uid); // Assuming db is auth.firestore
+        const userDocRef = doc(db, "users", firebaseUser.uid); 
         getDoc(userDocRef).then(userSnap => {
             let appUser: User;
             if (userSnap.exists()) {
@@ -158,7 +160,7 @@ export default function DiscoverShapesLayout({
                 servers={userServers}
                 channels={[]} // Discover page doesn't have its own server channels; DMs/Groups are separate
                 directMessages={userDirectMessages} 
-                botGroups={userBotGroups} 
+                botGroups={userBotGroups || []} // Ensure botGroups is always an array
                 currentUser={currentUser}
                 activeServerId={null} // No specific server active context on discover page
                 activeChannelId={null} // No specific channel active context initially on discover page
@@ -190,3 +192,4 @@ export default function DiscoverShapesLayout({
     </SidebarProvider>
   );
 }
+

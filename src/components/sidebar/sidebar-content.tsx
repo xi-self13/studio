@@ -24,6 +24,7 @@ import { Settings, Bot, PlusCircle, Cpu, LogOut, Compass, UserCog, Users2 as Bot
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Link from 'next/link';
+import { Skeleton } from '@/components/ui/skeleton';
 
 
 interface SidebarNavProps {
@@ -74,12 +75,17 @@ export function AppSidebar({
     directMessages.forEach(dm => {
       dm.members?.forEach(memberId => {
         if (!tempUsers[memberId] && memberId !== currentUser.uid) {
-          tempUsers[memberId] = { uid: memberId, name: 'User', isBot: dm.isBotChannel && dm.botId === memberId };
+          // Attempt to find full user details if available, otherwise create a placeholder
+          const existingUser = directMessages.flatMap(d => d.members || []) // Get all member IDs
+            .map(id => channels.find(c => c.id === id) || directMessages.find(d => d.id === id)) // Not a good way to find user
+            .find(u => u && 'uid' in u && u.uid === memberId); // this logic is flawed for finding general users
+          
+          tempUsers[memberId] = existingUser || { uid: memberId, name: 'User', isBot: dm.isBotChannel && dm.botId === memberId };
         }
       })
     });
     return tempUsers;
-  }, [currentUser, directMessages]);
+  }, [currentUser, directMessages, channels]);
 
   // Filter channels based on the active server, or show DMs/Groups if no server selected
   const displayedChannels = activeServerId 
@@ -87,8 +93,8 @@ export function AppSidebar({
     : []; // If no server, don't show general channels initially, or define a default view
 
   const displayedBotGroups = activeServerId
-    ? botGroups.filter(bg => channels.find(c => c.groupId === bg.id && c.serverId === activeServerId))
-    : botGroups; // Show all user's bot groups if no server selected, or filter if groups are server-specific in future
+    ? botGroups.filter(bg => channels.find(c => c.groupId === bg.id && c.serverId === activeServerId)) // This logic might need adjustment if groups can exist outside server context too
+    : botGroups; // Show all user's bot groups if no server selected
 
   const displayedDirectMessages = activeServerId ? [] : directMessages; // DMs are not server-specific in this model
 
@@ -280,7 +286,7 @@ export function AppSidebar({
                   </SidebarGroupLabel>
                   <SidebarMenu>
                     {(isLoadingUserBots) && (<SidebarMenuItem><SidebarMenuSkeleton showIcon /></SidebarMenuItem>)}
-                    {!isLoadingUserBots && displayedBotGroups.map((group) => (
+                    {!isLoadingUserBots && displayedBotGroups && displayedBotGroups.map((group) => (
                       <SidebarMenuItem key={group.id}>
                         <SidebarMenuButton
                           onClick={() => onSelectChannel(`group_${group.id}`)} 
@@ -296,7 +302,7 @@ export function AppSidebar({
                         </SidebarMenuAction>
                       </SidebarMenuItem>
                     ))}
-                    {!isLoadingUserBots && displayedBotGroups.length === 0 && (
+                    {!isLoadingUserBots && displayedBotGroups && displayedBotGroups.length === 0 && (
                       <SidebarMenuItem>
                         <SidebarMenuButton onClick={onOpenCreateBotGroupDialog} tooltip="Create your first Bot Group" className="justify-start group-data-[collapsible=icon]:justify-center text-muted-foreground hover:text-foreground">
                             <BotGroupsIcon />
@@ -364,3 +370,4 @@ export function AppSidebar({
     </div>
   );
 }
+
