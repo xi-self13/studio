@@ -83,7 +83,6 @@ const SidebarProvider = React.forwardRef<
           const persistedOpenState = cookieValue === 'true';
           _setOpen(persistedOpenState);
         } else {
-          // If no cookie, set based on defaultOpen (which is true for desktop)
            _setOpen(isMobile ? false : defaultOpen);
         }
       }
@@ -106,7 +105,7 @@ const SidebarProvider = React.forwardRef<
     )
 
     const toggleSidebar = React.useCallback(() => {
-      if (isMobile === undefined) return; // Wait until isMobile is determined
+      if (isMobile === undefined) return; 
       return isMobile
         ? setOpenMobile((current) => !current)
         : setOpen((current) => !current)
@@ -224,7 +223,6 @@ const Sidebar = React.forwardRef<
             }
             side={side}
           >
-            {/* Visually hidden title for accessibility */}
             <SheetTitle className="sr-only">Sidebar Navigation</SheetTitle>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContentPrimitive>
@@ -236,7 +234,7 @@ const Sidebar = React.forwardRef<
       <div
         ref={ref}
         className="group peer hidden md:block text-sidebar-foreground"
-        data-state={open ? "expanded" : "collapsed"} // Use `open` directly for desktop state
+        data-state={open ? "expanded" : "collapsed"} 
         data-collapsible={(open ? "expanded" : "collapsed") === "collapsed" ? collapsible : ""}
         data-variant={variant}
         data-side={side}
@@ -253,7 +251,7 @@ const Sidebar = React.forwardRef<
           className={cn(
             "duration-200 fixed inset-y-0 z-10 hidden h-svh transition-[left,right,width] ease-linear md:flex",
             side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:group-data-[state=collapsed]:left-[calc(var(--sidebar-width)*-1)]" 
+              ? "left-16 group-data-[collapsible=offcanvas]:group-data-[state=collapsed]:!left-[calc(var(--sidebar-width)*-1)]" // Changed left-0 to left-16, added ! for offcanvas override
               : "right-0 group-data-[collapsible=offcanvas]:group-data-[state=collapsed]:right-[calc(var(--sidebar-width)*-1)]",
             open ? "w-[--sidebar-width]" : (variant === "floating" || variant === "inset" ? "w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+_2px)]" : "w-[--sidebar-width-icon]"),
             variant === "floating" || variant === "inset"
@@ -314,7 +312,7 @@ const MobileSidebarTrigger = React.forwardRef<
       data-sidebar="mobile-trigger"
       variant="ghost"
       size="icon"
-      className={cn("h-7 w-7 md:hidden", className)} // Ensure it's hidden on desktop
+      className={cn("h-7 w-7 md:hidden", className)} 
       onClick={(event) => {
         onClick?.(event);
         setOpenMobile(prev => !prev);
