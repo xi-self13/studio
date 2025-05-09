@@ -88,29 +88,45 @@ export default {
   			'accordion-down': 'accordion-down 0.2s ease-out',
   			'accordion-up': 'accordion-up 0.2s ease-out'
   		},
-      typography: ({ theme }: { theme: any }) => ({ // Added typography plugin configuration
+      typography: ({ theme }: { theme: any }) => ({
         DEFAULT: {
           css: {
+            // Base styles for `prose` - these should be dark-theme friendly as the app is always dark
             '--tw-prose-body': theme('colors.foreground / 1'),
             '--tw-prose-headings': theme('colors.foreground / 1'),
-            '--tw-prose-lead': theme('colors.foreground / 1'),
+            '--tw-prose-lead': theme('colors.foreground / 0.9'),
             '--tw-prose-links': theme('colors.primary / 1'),
             '--tw-prose-bold': theme('colors.foreground / 1'),
-            '--tw-prose-counters': theme('colors.muted.foreground / 1'),
-            '--tw-prose-bullets': theme('colors.muted.foreground / 1'),
-            '--tw-prose-hr': theme('colors.border / 1'),
+            '--tw-prose-counters': theme('colors.foreground / 0.7'),
+            '--tw-prose-bullets': theme('colors.foreground / 0.5'),
+            '--tw-prose-hr': theme('colors.border / 0.5'),
             '--tw-prose-quotes': theme('colors.foreground / 1'),
             '--tw-prose-quote-borders': theme('colors.primary / 1'),
-            '--tw-prose-captions': theme('colors.muted.foreground / 1'),
-            '--tw-prose-code': theme('colors.foreground / 1'),
-            '--tw-prose-pre-code': theme('colors.card.foreground / 1'),
-            '--tw-prose-pre-bg': theme('colors.card / 1'),
-            '--tw-prose-th-borders': theme('colors.border / 1'),
-            '--tw-prose-td-borders': theme('colors.border / 1'),
-            '--tw-prose-invert-body': theme('colors.background / 1'), // Example for dark mode, adjust as needed
-            '--tw-prose-invert-headings': theme('colors.background / 1'),
-            '--tw-prose-invert-links': theme('colors.accent / 1'),
-            // Add more overrides for dark theme if necessary
+            '--tw-prose-captions': theme('colors.foreground / 0.7'),
+            '--tw-prose-code': theme('colors.foreground / 1'), // Inline code text
+            '--tw-prose-pre-code': theme('colors.card.foreground / 1'), // Text in code blocks
+            '--tw-prose-pre-bg': theme('colors.muted / 1'), // Background for code blocks
+            '--tw-prose-th-borders': theme('colors.border / 0.7'),
+            '--tw-prose-td-borders': theme('colors.border / 0.5'),
+
+            // Invert styles (applied by `dark:prose-invert` which is active due to html.dark)
+            // These explicitly set the colors for the inverted state.
+            '--tw-prose-invert-body': theme('colors.foreground / 1'),
+            '--tw-prose-invert-headings': theme('colors.foreground / 1'),
+            '--tw-prose-invert-lead': theme('colors.foreground / 0.9'),
+            '--tw-prose-invert-links': theme('colors.primary / 1'),
+            '--tw-prose-invert-bold': theme('colors.foreground / 1'),
+            '--tw-prose-invert-counters': theme('colors.foreground / 0.7'),
+            '--tw-prose-invert-bullets': theme('colors.foreground / 0.5'),
+            '--tw-prose-invert-hr': theme('colors.border / 0.5'),
+            '--tw-prose-invert-quotes': theme('colors.foreground / 1'),
+            '--tw-prose-invert-quote-borders': theme('colors.primary / 1'),
+            '--tw-prose-invert-captions': theme('colors.foreground / 0.7'),
+            '--tw-prose-invert-code': theme('colors.foreground / 1'),
+            '--tw-prose-invert-pre-code': theme('colors.card.foreground / 1'),
+            '--tw-prose-invert-pre-bg': theme('colors.muted / 1'),
+            '--tw-prose-invert-th-borders': theme('colors.border / 0.7'),
+            '--tw-prose-invert-td-borders': theme('colors.border / 0.5'),
           },
         },
       }),
@@ -118,6 +134,6 @@ export default {
   },
   plugins: [
     require("tailwindcss-animate"),
-    require('@tailwindcss/typography'), // Added typography plugin
+    require('@tailwindcss/typography'),
   ],
 } satisfies Config;
