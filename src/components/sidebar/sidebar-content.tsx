@@ -1,5 +1,7 @@
+
 "use client";
 
+import * as React from "react"; // Added React import
 import type { Channel, User, BotGroup } from '@/types'; 
 import {
   Sidebar,
@@ -74,7 +76,7 @@ export function AppSidebar({
 
 
   return (
-    <Sidebar collapsible="none" variant="sidebar" side="left" className="border-r border-sidebar-border">
+    <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r border-sidebar-border">
       <SidebarHeader className="p-4 items-center">
         <div className="flex items-center gap-2">
           <ShapeTalkLogo className="w-8 h-8 text-primary" />
