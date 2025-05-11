@@ -4,6 +4,7 @@
 /**
  * @fileOverview Flow to interact with a Shape using the Shapes.inc API.
  * Supports both a default bot using environment variables and user-created bots with specific credentials.
+ * Includes prompt augmentation to simulate "thinking" or "searching" based on user input.
  *
  * - chatWithShape - A function that sends a message to a specified Shape and returns its response.
  * - ChatWithShapeInput - The input type for the chatWithShape function.
@@ -14,7 +15,7 @@ import { z } from 'genkit'; // z is for zod schema validation
 import { getShapeById } from '@/lib/shapes';
 
 const ChatWithShapeInputSchema = z.object({
-  promptText: z.string().describe('The user message to send to the Shape.'),
+  promptText: z.string().min(1, 'Prompt text cannot be empty.').describe('The user message to send to the Shape.'),
   contextShapeId: z.string().describe('The ID of the predefined shape used as context for the conversation. (Currently informational for prompt construction, not directly used by Shapes API in a specific field).'),
   userId: z.string().describe('The Firebase UID of the user initiating the chat.'),
   channelId: z.string().describe('The ID of the channel where the chat is happening.'),
@@ -60,21 +61,47 @@ export async function chatWithShape(
   const selectedShape = getShapeById(contextShapeId);
   const shapeNameForContext = selectedShape?.name || 'the selected concept';
   
-  let userMessageContent = promptText;
-  if (systemPrompt) {
-    userMessageContent = `${systemPrompt}\n\nUser query regarding "${shapeNameForContext}": ${promptText}`;
-  } else {
-    userMessageContent = `User query regarding "${shapeNameForContext}": ${promptText}`;
+  let augmentedPromptText = promptText;
+  const lowerCasePrompt = promptText.toLowerCase();
+
+  // Keywords for "searching" or information retrieval
+  const searchKeywords = ["search for", "find out about", "what is", "tell me about", "explain", "define", "research", "look up"];
+  // Keywords for "thinking" or deeper analysis
+  const thinkingKeywords = ["think about", "consider", "analyze", "reflect on"];
+
+  let prePrompt = "";
+
+  if (searchKeywords.some(keyword => lowerCasePrompt.includes(keyword))) {
+    prePrompt = `The user is looking for information or an explanation. `;
+  } else if (thinkingKeywords.some(keyword => lowerCasePrompt.includes(keyword))) {
+    prePrompt = `The user is asking for a thoughtful analysis or consideration. `;
   }
   
-  const messagesPayload = [{ role: 'user', content: userMessageContent }];
+  let userMessageContent: string;
+
+  if (systemPrompt) {
+    userMessageContent = `${systemPrompt}\n\n${prePrompt}Regarding "${shapeNameForContext}", user query: ${promptText}`;
+  } else {
+    userMessageContent = `${prePrompt}User query regarding "${shapeNameForContext}": ${promptText}`;
+  }
+  
+  // Ensure the final userMessageContent is not just the prePrompt if promptText was empty
+  if (promptText.trim() === "" && prePrompt.trim() !== "") {
+      userMessageContent = prePrompt + `Please provide a general response regarding "${shapeNameForContext}".`;
+  } else if (promptText.trim() === "" && prePrompt.trim() === "") {
+    // This case should be prevented by schema validation, but as a failsafe.
+    userMessageContent = `User query regarding "${shapeNameForContext}": Please provide a general response.`;
+  }
+
+
+  const messagesPayload = [{ role: 'user', content: userMessageContent.trim() }];
 
   try {
     const requestPayloadLog = {
         model: `shapesinc/${shapeUsernameToUse}`,
         userId,
         channelId,
-        messageContentLength: userMessageContent.length
+        messageContentLength: userMessageContent.trim().length
     };
 
     const response = await fetch('https://api.shapes.inc/v1/chat/completions', {
@@ -132,16 +159,13 @@ export async function chatWithShape(
     }
 
   } catch (error) {
-    console.error('Exception during Shapes API call in chatWithShape:', error); // Log the original error
+    console.error('Exception during Shapes API call in chatWithShape:', error); 
     if (error instanceof Error) {
-        // Check if the error message indicates a fetch-related failure (e.g., network error)
         if (error.message.toLowerCase().includes('fetch') || error.message.toLowerCase().includes('network') || error.message.toLowerCase().includes('dns')) {
              throw new Error('Network connection to the Shapes API failed. Please check your internet connection or try again later.');
         }
-        // For other errors that are already Error instances, re-throw their message or a generic one.
         throw new Error(error.message || 'An error occurred while processing the request with the Shapes API.');
     }
-    // For non-Error objects caught (less common)
     throw new Error('An unknown error occurred while communicating with the Shapes API.');
   }
 }
