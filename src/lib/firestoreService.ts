@@ -1,5 +1,5 @@
 // src/lib/firestoreService.ts
-'use server';
+// 'use server'; // Removed: This directive was causing issues with non-async functions like onSnapshot.
 
 import { db } from './firebase';
 import {
@@ -17,16 +17,19 @@ import {
   arrayRemove,
   serverTimestamp,
   writeBatch,
-  Timestamp
+  Timestamp,
+  orderBy,
+  onSnapshot,
+  Unsubscribe
 } from 'firebase/firestore'; 
-import type { BotConfig, PlatformShape, BotGroup, TypingIndicator, User } from '@/types'; 
+import type { BotConfig, PlatformShape, BotGroup, TypingIndicator, User, Message } from '@/types'; 
 
 const USER_BOTS_COLLECTION = 'userBots'; 
 const PLATFORM_SHAPES_COLLECTION = 'platformShapes'; 
 const BOT_GROUPS_COLLECTION = 'botGroups';
-// const SERVERS_COLLECTION = 'servers'; // REMOVED
 const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; 
 const USERS_COLLECTION = 'users';
+const MESSAGES_COLLECTION = 'messages';
 
 
 // --- User Profile Functions ---
@@ -408,8 +411,50 @@ export async function removeBotFromGroupInFirestore(groupId: string, botId: stri
   }
 }
 
+// --- Message Functions ---
+export async function saveMessageToFirestore(message: Message): Promise<void> {
+  try {
+    const messageDocRef = doc(db, MESSAGES_COLLECTION, message.id);
+    await setDoc(messageDocRef, {
+      ...message,
+      timestamp: Timestamp.fromMillis(message.timestamp), // Store as Firestore Timestamp
+    });
+    // console.log(`Message ${message.id} saved to channel ${message.channelId}.`);
+  } catch (error) {
+    console.error('Error saving message to Firestore:', error);
+    // Do not throw here, as it might interrupt chat flow for a non-critical error
+    // Consider logging to a more robust system in production
+  }
+}
 
-// --- Server Functions --- // REMOVED
+export function subscribeToChannelMessages(
+  channelId: string,
+  onMessagesUpdate: (messages: Message[]) => void
+): Unsubscribe {
+  const messagesRef = collection(db, MESSAGES_COLLECTION);
+  const q = query(messagesRef, where('channelId', '==', channelId), orderBy('timestamp', 'asc'));
+
+  const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const messages: Message[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      messages.push({
+        id: docSnap.id,
+        userId: data.userId,
+        channelId: data.channelId,
+        content: data.content,
+        timestamp: (data.timestamp as Timestamp).toMillis(), // Convert Firestore Timestamp to number
+        reactions: data.reactions,
+      } as Message);
+    });
+    onMessagesUpdate(messages);
+  }, (error) => {
+    console.error(`Error listening to messages for channel ${channelId}:`, error);
+    // Handle error appropriately, maybe call onMessagesUpdate with an empty array or an error state
+  });
+
+  return unsubscribe;
+}
 
 
 // --- Typing Indicator Functions ---
@@ -442,10 +487,12 @@ export async function cleanupOldTypingIndicators(timeoutMillis: number = 5000): 
     const q = query(collection(db, TYPING_INDICATORS_COLLECTION), where('timestamp', '<', cutoff));
     const snapshot = await getDocs(q);
     const batch = writeBatch(db);
-    snapshot.docs.forEach(docSnap => batch.delete(docSnap.ref)); // Corrected doc to docSnap
+    snapshot.docs.forEach(docSnap => batch.delete(docSnap.ref));
     await batch.commit();
     console.log(`Cleaned up ${snapshot.size} old typing indicators.`);
   } catch (error) {
     console.error('Error cleaning up old typing indicators:', error);
   }
 }
+
+    
