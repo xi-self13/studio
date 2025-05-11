@@ -1,7 +1,7 @@
 
 "use client"; 
 
-import { ServerRail } from '@/components/sidebar/server-rail';
+// import { ServerRail } from '@/components/sidebar/server-rail'; // REMOVED
 import { MainChannelSidebarContent } from '@/components/sidebar/main-channel-sidebar-content';
 import { Sidebar, SidebarProvider } from '@/components/ui/sidebar';
 import { useState, useEffect, useCallback } from 'react';
@@ -9,12 +9,15 @@ import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import type { User, Channel, BotGroup, Server } from '@/types';
+import type { User, Channel, BotGroup } from '@/types'; // Server type removed
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore, getServersForUserFromFirestore } from '@/lib/firestoreService';
-import { Bot, Cpu, Loader2 } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
+import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore } from '@/lib/firestoreService'; // getServersForUserFromFirestore removed
+import { Bot, Cpu, Loader2, Compass } from 'lucide-react'; // Added Compass
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import { ShapeTalkLogo } from '@/components/icons/logo';
+
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; 
@@ -32,13 +35,13 @@ export default function DiscoverShapesLayout({
   children: React.ReactNode;
 }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [userServers, setUserServers] = useState<Server[]>([]);
+  // const [userServers, setUserServers] = useState<Server[]>([]); // REMOVED
   const [userDirectMessages, setUserDirectMessages] = useState<Channel[]>([]);
   const [userBotGroups, setUserBotGroups] = useState<BotGroup[]>([]);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingDMs, setIsLoadingDMs] = useState(false);
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
-  const [isLoadingServersState, setIsLoadingServersState] = useState(false);
+  // const [isLoadingServersState, setIsLoadingServersState] = useState(false); // REMOVED
   const router = useRouter();
   const [activeChannelIdForDiscover, setActiveChannelIdForDiscover] = useState<string | null>(null);
 
@@ -82,18 +85,7 @@ export default function DiscoverShapesLayout({
     }
   }, []);
 
-  const loadUserServersForLayout = useCallback(async (userId: string) => {
-    setIsLoadingServersState(true);
-    try {
-      const servers = await getServersForUserFromFirestore(userId);
-      setUserServers(servers);
-    } catch (error) {
-      console.error("Failed to load user servers for discover page:", error);
-      setUserServers([]);
-    } finally {
-      setIsLoadingServersState(false);
-    }
-  }, []);
+  // loadUserServersForLayout REMOVED
 
   useEffect(() => {
     setIsLoadingAuth(true);
@@ -111,8 +103,11 @@ export default function DiscoverShapesLayout({
                     email: firebaseUser.email,
                     statusMessage: userData?.statusMessage,
                     isBot: false,
+                    shapesIncApiKey: userData?.shapesIncApiKey,
+                    shapesIncUsername: userData?.shapesIncUsername,
+                    linkedAccounts: userData?.linkedAccounts || [],
                 };
-            } else {
+            } else { // Should ideally not happen if signup creates user doc
                 appUser = {
                     uid: firebaseUser.uid,
                     name: firebaseUser.displayName || firebaseUser.email || 'User',
@@ -124,18 +119,18 @@ export default function DiscoverShapesLayout({
             setCurrentUser(appUser);
             loadUserDMs(firebaseUser.uid);
             loadUserBotGroups(firebaseUser.uid); 
-            loadUserServersForLayout(firebaseUser.uid);
+            // loadUserServersForLayout(firebaseUser.uid); // REMOVED
         });
       } else {
         setCurrentUser(null);
-        setUserDirectMessages([]);
+        setUserDirectMessages(staticGlobalChannelsForDiscover.filter(c => c.type === 'dm').map(c => ({...c, members:['placeholderGuest', c.botId!]})));
         setUserBotGroups([]); 
-        setUserServers([]);
+        // setUserServers([]); // REMOVED
       }
       setIsLoadingAuth(false);
     });
     return () => unsubscribe();
-  }, [loadUserDMs, loadUserBotGroups, loadUserServersForLayout]);
+  }, [loadUserDMs, loadUserBotGroups /*loadUserServersForLayout REMOVED*/]);
 
   if (isLoadingAuth && !currentUser) {
     return (
@@ -146,50 +141,72 @@ export default function DiscoverShapesLayout({
     );
   }
   
+  const globalChannelsForSidebar = staticGlobalChannelsForDiscover.filter(c => c.type === 'channel');
+
+
   return (
     <div className="flex h-screen max-h-screen overflow-hidden bg-background">
-      {currentUser && (
-        <ServerRail
-            servers={userServers}
-            currentUser={currentUser}
-            activeServerId={null} // No active server on discover page itself
-            onSelectServer={(serverId) => router.push('/')} // Selecting a server navigates to main chat
-            onOpenCreateServerDialog={() => router.push('/')} // Redirect to main page for creation
-            isLoadingServers={isLoadingServersState}
-            isDiscoverPage={true}
-        />
-      )}
-      {!currentUser && ( // Placeholder for server rail if not logged in
-          <div className="w-16 bg-muted/30 border-r border-sidebar-border shrink-0"></div>
-      )}
+       {/* Simplified static rail for discover pages */}
+        <div className="w-16 bg-sidebar-background border-r border-sidebar-border flex flex-col items-center py-3 space-y-3 overflow-y-auto no-scrollbar shrink-0">
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant={"ghost"}
+                            size="icon"
+                            className="h-12 w-12 rounded-full"
+                            onClick={() => router.push('/')} 
+                            aria-label="Direct Messages & Home"
+                        >
+                            <ShapeTalkLogo className="h-7 w-7 text-primary" />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Back to Chat</TooltipContent>
+                </Tooltip>
+                 <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant={router.pathname === '/discover-shapes' ? "secondary" : "ghost"}
+                            size="icon"
+                            className="h-12 w-12 rounded-full text-sidebar-foreground hover:text-primary"
+                            aria-label="Discover Shapes"
+                            onClick={() => router.push('/discover-shapes')} 
+                        >
+                            <Compass />
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Discover Shapes</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        </div>
+
 
       <SidebarProvider defaultOpen={true}>
         {currentUser ? (
             <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r border-sidebar-border">
                 <MainChannelSidebarContent
-                    channels={[]} // Discover page might not have server-specific channels in its main sidebar
+                    channels={globalChannelsForSidebar} 
                     directMessages={userDirectMessages}
                     botGroups={userBotGroups || []}
                     currentUser={currentUser}
-                    activeServerId={null} // No specific server context in discover's main sidebar
-                    activeChannelId={activeChannelIdForDiscover} // Manage active DM/Group for discover context if needed
+                    activeServerId={null} 
+                    activeChannelId={activeChannelIdForDiscover} 
                     serverName="Discover"
                     onSelectChannel={(channelId) => {
-                        // Handle DM selection or navigate back to main chat
-                        // For simplicity, DMs here could navigate back to main chat with that DM active
-                        setActiveChannelIdForDiscover(channelId); // Or manage local state
-                        router.push(`/?channel=${channelId}`); // Example: navigate to main chat with DM
+                        setActiveChannelIdForDiscover(channelId); 
+                        router.push(`/?channel=${channelId}`); 
                     }}
-                    onOpenAccountSettings={() => router.push('/')}
-                    onAddChannel={() => router.push('/')} 
+                    onOpenAccountSettings={() => router.push('/')} // Redirect to main for account settings or implement modal here
+                    onAddChannel={() => {}} // No server-specific channels here 
                     onOpenCreateBotDialog={() => router.push('/')} 
                     onOpenCreateBotGroupDialog={() => router.push('/')} 
-                    onOpenManageBotGroupDialog={(groupId) => router.push('/')} 
+                    onOpenManageBotGroupDialog={(groupId) => router.push(`/?group=${groupId}`)} 
                     onLogout={async () => {
                       await auth.signOut();
                       router.push('/'); 
                     }}
                     isLoadingUserBots={isLoadingDMs || isLoadingBotGroups}
+                    isLoadingServers={false} // No server specific data here
                 />
             </Sidebar>
         ) : (
@@ -198,7 +215,6 @@ export default function DiscoverShapesLayout({
             </div>
         )}
         
-        {/* Main content area for the discover page */}
         <main className="flex-1 overflow-y-auto">
           {children}
         </main>

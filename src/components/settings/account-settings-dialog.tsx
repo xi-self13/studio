@@ -26,18 +26,26 @@ import {
   FormDescription,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea'; // Added for status message
+import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { UserCog, Loader2 } from 'lucide-react';
-import { updateProfile } from 'firebase/auth';
+import { UserCog, Loader2, Link as LinkIcon, CheckCircle, AlertCircle } from 'lucide-react';
+import { updateProfile, GoogleAuthProvider, linkWithPopup, type UserCredential, type AuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { updateUserProfileInFirestore } from '@/lib/firestoreService'; // For updating Firestore
+import { updateUserProfileInFirestore } from '@/lib/firestoreService';
+import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
+import { Separator } from '@/components/ui/separator';
 
 const formSchema = z.object({
   displayName: z.string().min(2, 'Display name must be at least 2 characters.').max(50, 'Display name must be 50 characters or less.'),
   statusMessage: z.string().max(100, "Status message must be 100 characters or less.").optional(),
   avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
+  shapesIncUsername: z.string().optional().or(z.literal('')),
+  shapesIncApiKey: z.string().optional().or(z.literal('')),
+}).refine(data => (data.shapesIncUsername && data.shapesIncApiKey) || (!data.shapesIncUsername && !data.shapesIncApiKey), {
+  message: "Both Shapes.inc Username and API Key must be provided, or neither.",
+  path: ["shapesIncApiKey"], // Or shapesIncUsername, path for error display
 });
+
 
 type AccountSettingsFormValues = z.infer<typeof formSchema>;
 
@@ -45,7 +53,8 @@ interface AccountSettingsDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   currentUser: User | null;
-  onAccountUpdate: (updatedUser: User) => void;
+  onAccountUpdate: (updatedUser: Partial<User>) => void;
+  onAuthError: (error: any, actionType: "Login" | "Sign Up" | "Link Account") => void;
 }
 
 export function AccountSettingsDialog({
@@ -53,8 +62,11 @@ export function AccountSettingsDialog({
   onOpenChange,
   currentUser,
   onAccountUpdate,
+  onAuthError,
 }: AccountSettingsDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [isTestingShapesApi, setIsTestingShapesApi] = useState(false);
+  const [shapesApiStatus, setShapesApiStatus] = useState<{ok: boolean, message: string} | null>(null);
   const { toast } = useToast();
 
   const form = useForm<AccountSettingsFormValues>({
@@ -63,6 +75,8 @@ export function AccountSettingsDialog({
       displayName: currentUser?.name || '',
       statusMessage: currentUser?.statusMessage || '',
       avatarUrl: currentUser?.avatarUrl || '',
+      shapesIncUsername: currentUser?.shapesIncUsername || '',
+      shapesIncApiKey: currentUser?.shapesIncApiKey || '',
     },
   });
 
@@ -72,9 +86,48 @@ export function AccountSettingsDialog({
         displayName: currentUser.name || '',
         statusMessage: currentUser.statusMessage || '',
         avatarUrl: currentUser.avatarUrl || '',
+        shapesIncUsername: currentUser.shapesIncUsername || '',
+        shapesIncApiKey: currentUser.shapesIncApiKey || '',
       });
+      setShapesApiStatus(null); // Reset API status on dialog open/user change
     }
   }, [currentUser, form, isOpen]);
+
+  const handleTestShapesApi = async () => {
+    const username = form.getValues("shapesIncUsername");
+    const apiKey = form.getValues("shapesIncApiKey");
+
+    if (!username || !apiKey) {
+      setShapesApiStatus({ ok: false, message: "Please enter both Shapes.inc Username and API Key." });
+      return;
+    }
+    setIsTestingShapesApi(true);
+    setShapesApiStatus(null);
+    try {
+      // Temporarily override process.env for checkShapesApiHealth if it relies on them
+      // This is a common pattern for testing; adapt if checkShapesApiHealth can take params
+      const originalEnvKey = process.env.SHAPESINC_API_KEY;
+      const originalEnvUser = process.env.SHAPESINC_SHAPE_USERNAME;
+      process.env.SHAPESINC_API_KEY = apiKey;
+      process.env.SHAPESINC_SHAPE_USERNAME = username;
+
+      const result = await checkShapesApiHealth();
+      
+      // Restore original env vars
+      process.env.SHAPESINC_API_KEY = originalEnvKey;
+      process.env.SHAPESINC_SHAPE_USERNAME = originalEnvUser;
+
+      if (result.healthy) {
+        setShapesApiStatus({ ok: true, message: "Connection successful!" });
+      } else {
+        setShapesApiStatus({ ok: false, message: result.error || "Connection failed." });
+      }
+    } catch (error) {
+      setShapesApiStatus({ ok: false, message: error instanceof Error ? error.message : "An unknown error occurred."});
+    } finally {
+      setIsTestingShapesApi(false);
+    }
+  };
 
   const onSubmit: SubmitHandler<AccountSettingsFormValues> = async (data) => {
     if (!currentUser || !auth.currentUser) {
@@ -83,60 +136,83 @@ export function AccountSettingsDialog({
     }
     setIsLoading(true);
     try {
-      // Update Firebase Auth profile
       await updateProfile(auth.currentUser, {
         displayName: data.displayName,
-        photoURL: data.avatarUrl || null, // Pass null if empty to potentially clear it
+        photoURL: data.avatarUrl || null,
       });
 
-      // Prepare data for Firestore update
-      const firestoreUpdateData: Partial<Pick<User, 'name' | 'avatarUrl' | 'statusMessage'>> = {
+      const firestoreUpdateData: Partial<User> = {
         name: data.displayName,
-        statusMessage: data.statusMessage || null, // Store null if empty
+        statusMessage: data.statusMessage || null,
         avatarUrl: data.avatarUrl || null,
+        shapesIncUsername: data.shapesIncUsername || null,
+        shapesIncApiKey: data.shapesIncApiKey || null, // Store as is, handle security implications externally
       };
       
       await updateUserProfileInFirestore(currentUser.uid, firestoreUpdateData);
 
-      const updatedUser: User = {
-        ...currentUser,
-        name: data.displayName,
-        statusMessage: data.statusMessage || undefined, // Reflect undefined if empty in local state
-        avatarUrl: data.avatarUrl || undefined,
-      };
-      onAccountUpdate(updatedUser);
+      onAccountUpdate(firestoreUpdateData); // Pass only updated fields
 
-      toast({ title: "Account Updated", description: "Your account details have been updated." });
+      toast({ title: "Account Updated", description: "Your account details have been saved." });
       onOpenChange(false);
     } catch (error) {
       console.error("Error updating profile:", error);
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
-      toast({
-        title: "Update Failed",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      onAuthError(error, "Link Account"); // Use a generic type or adjust as needed
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleLinkAccount = async (provider: AuthProvider) => {
+    if (!auth.currentUser) {
+      toast({ title: "Not Logged In", description: "You must be logged in to link accounts.", variant: "destructive" });
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const result = await linkWithPopup(auth.currentUser, provider);
+      const credential = (provider.providerId === GoogleAuthProvider.PROVIDER_ID ? GoogleAuthProvider.credentialFromResult(result) : null);
+      // Update user profile in Firestore with new linked account info
+      const newLinkedAccount = {
+        providerId: result.providerId,
+        email: result.user.email,
+        displayName: result.user.displayName,
+      };
+      const updatedLinkedAccounts = [...(currentUser?.linkedAccounts || []), newLinkedAccount]
+        .filter((acc, index, self) => index === self.findIndex(a => a.providerId === acc.providerId)); // Ensure uniqueness
+
+      await updateUserProfileInFirestore(currentUser!.uid, { linkedAccounts: updatedLinkedAccounts });
+      onAccountUpdate({ linkedAccounts: updatedLinkedAccounts });
+      toast({ title: "Account Linked!", description: `Successfully linked your ${result.providerId.replace('.com','')} account.` });
+    } catch (error: any) {
+      onAuthError(error, "Link Account");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
-      if (!isLoading) {
+      if (!isLoading && !isTestingShapesApi) {
         onOpenChange(open);
-        if (!open) form.reset({ 
-            displayName: currentUser?.name || '', 
-            statusMessage: currentUser?.statusMessage || '',
-            avatarUrl: currentUser?.avatarUrl || ''
-        });
+        if (!open) {
+          form.reset({ 
+              displayName: currentUser?.name || '', 
+              statusMessage: currentUser?.statusMessage || '',
+              avatarUrl: currentUser?.avatarUrl || '',
+              shapesIncUsername: currentUser?.shapesIncUsername || '',
+              shapesIncApiKey: currentUser?.shapesIncApiKey || '',
+          });
+          setShapesApiStatus(null);
+        }
       }
     }}>
       <DialogContent className="sm:max-w-md bg-card">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><UserCog className="text-primary" /> Account Settings</DialogTitle>
           <DialogDescription>
-            Update your account details. Email cannot be changed here.
+            Update your account details, link external accounts, and manage Shapes.inc credentials. Email cannot be changed here.
           </DialogDescription>
         </DialogHeader>
         {currentUser ? (
@@ -184,13 +260,73 @@ export function AccountSettingsDialog({
                   </FormItem>
                 )}
               />
-              <DialogFooter className="pt-4">
+
+              <Separator />
+              <h3 className="text-md font-medium pt-2">Shapes.inc Credentials</h3>
+               <FormDescription className="text-xs -mt-2">
+                Link your Shapes.inc account to use with the default AI assistant.
+               </FormDescription>
+              <FormField
+                control={form.control}
+                name="shapesIncUsername"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Shapes.inc Username</FormLabel>
+                    <FormControl>
+                      <Input placeholder="your-shape-username" {...field} value={field.value ?? ''} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="shapesIncApiKey"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Shapes.inc API Key</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="your-shapes-api-key" {...field} value={field.value ?? ''} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={handleTestShapesApi} disabled={isTestingShapesApi}>
+                {isTestingShapesApi ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Test Shapes.inc Connection
+              </Button>
+              {shapesApiStatus && (
+                <div className={`flex items-center text-sm mt-2 p-2 rounded-md ${shapesApiStatus.ok ? 'bg-green-500/20 text-green-700' : 'bg-destructive/20 text-destructive'}`}>
+                  {shapesApiStatus.ok ? <CheckCircle className="mr-2 h-4 w-4" /> : <AlertCircle className="mr-2 h-4 w-4" />}
+                  {shapesApiStatus.message}
+                </div>
+              )}
+
+              <Separator />
+              <h3 className="text-md font-medium pt-2">Linked Accounts</h3>
+              <div className="space-y-2">
+                {currentUser.linkedAccounts?.find(acc => acc.providerId === GoogleAuthProvider.PROVIDER_ID) ? (
+                   <div className="flex items-center justify-between text-sm p-2 border rounded-md bg-muted">
+                     <span>Google ({currentUser.linkedAccounts.find(acc => acc.providerId === GoogleAuthProvider.PROVIDER_ID)?.email})</span>
+                     <CheckCircle className="text-green-500" />
+                   </div>
+                ) : (
+                  <Button type="button" variant="outline" className="w-full" onClick={() => handleLinkAccount(new GoogleAuthProvider())} disabled={isLoading}>
+                    <LinkIcon className="mr-2 h-4 w-4" /> Link Google Account
+                  </Button>
+                )}
+                {/* Add more providers here, e.g., GitHub */}
+              </div>
+
+
+              <DialogFooter className="pt-6">
                 <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={isLoading}>
+                  <Button type="button" variant="outline" disabled={isLoading || isTestingShapesApi}>
                     Cancel
                   </Button>
                 </DialogClose>
-                <Button type="submit" disabled={isLoading}>
+                <Button type="submit" disabled={isLoading || isTestingShapesApi}>
                   {isLoading ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (

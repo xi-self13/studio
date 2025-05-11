@@ -7,6 +7,9 @@ export interface User {
   isBot?: boolean; 
   dataAiHint?: string; 
   statusMessage?: string; // New field for user status
+  linkedAccounts?: Array<{ providerId: string; displayName?: string; email?: string }>;
+  shapesIncApiKey?: string;
+  shapesIncUsername?: string;
 }
 
 export interface Shape {
@@ -38,7 +41,7 @@ export interface Channel {
   id: string; 
   name: string;
   type: 'channel' | 'dm' | 'group'; // Type of channel
-  serverId?: string; // ID of the server this channel belongs to, if applicable
+  // serverId?: string; // ID of the server this channel belongs to, if applicable - REMOVED
   members?: string[]; 
   unreadCount?: number;
   icon?: React.ElementType; 
@@ -86,19 +89,6 @@ export interface BotGroup {
   memberUserIds: string[]; // Array of User UIDs (besides owner) who are members of this group (future use for multi-user groups)
 }
 
-// New Server type
-export interface Server {
-  id: string;
-  name: string;
-  ownerUserId: string;
-  avatarUrl?: string;
-  dataAiHint?: string; // for placeholder images
-  channelIds?: string[]; // IDs of channels belonging to this server
-  memberUserIds?: string[]; // IDs of users who are members (including owner)
-  isCommunity?: boolean; // True if server is discoverable
-  inviteCode?: string; // Unique code to join the server
-}
-
 // New Typing Indicator type
 export interface TypingIndicator {
   userId: string;
@@ -107,3 +97,4 @@ export interface TypingIndicator {
   timestamp: number; // To clear old indicators
 }
 
+// Server interface is REMOVED
