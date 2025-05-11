@@ -1,7 +1,5 @@
-
 "use client"; 
 
-// import { ServerRail } from '@/components/sidebar/server-rail'; // REMOVED
 import { MainChannelSidebarContent } from '@/components/sidebar/main-channel-sidebar-content';
 import { Sidebar, SidebarProvider } from '@/components/ui/sidebar';
 import { useState, useEffect, useCallback } from 'react';
@@ -9,11 +7,11 @@ import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import type { User, Channel, BotGroup, BotConfig, PlatformShape } from '@/types'; // Server type removed, Added BotConfig, PlatformShape
-import { useRouter } from 'next/navigation';
+import type { User, Channel, BotGroup, BotConfig, PlatformShape } from '@/types';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'; // Added usePathname, useSearchParams
 import Link from 'next/link';
-import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore } from '@/lib/firestoreService'; // getServersForUserFromFirestore removed
-import { Bot, Cpu, Loader2, Compass } from 'lucide-react'; // Added Compass
+import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore } from '@/lib/firestoreService';
+import { Bot, Cpu, Loader2, Compass } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ShapeTalkLogo } from '@/components/icons/logo';
@@ -35,14 +33,14 @@ export default function DiscoverShapesLayout({
   children: React.ReactNode;
 }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  // const [userServers, setUserServers] = useState<Server[]>([]); // REMOVED
   const [userDirectMessages, setUserDirectMessages] = useState<Channel[]>([]);
   const [userBotGroups, setUserBotGroups] = useState<BotGroup[]>([]);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingDMs, setIsLoadingDMs] = useState(false);
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
-  // const [isLoadingServersState, setIsLoadingServersState] = useState(false); // REMOVED
   const router = useRouter();
+  const pathname = usePathname(); // For active state on Compass icon
+  const searchParams = useSearchParams(); // For initial channel selection if needed
   const [activeChannelIdForDiscover, setActiveChannelIdForDiscover] = useState<string | null>(null);
 
 
@@ -59,14 +57,21 @@ export default function DiscoverShapesLayout({
         botId: bc.id,
         icon: Bot,
       }));
-      const defaultBotDmExists = botDMs.some(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
-      const globalStaticDMs = staticGlobalChannelsForDiscover.filter(c => c.type === 'dm' && c.botId === DEFAULT_AI_BOT_USER_ID && !defaultBotDmExists)
-        .map(c => ({...c, members: [userId, DEFAULT_AI_BOT_USER_ID]}));
+      
+      const defaultBotDm = staticGlobalChannelsForDiscover.find(c => c.type === 'dm' && c.botId === DEFAULT_AI_BOT_USER_ID);
+      const globalStaticDMs = defaultBotDm ? [{...defaultBotDm, members: [userId, DEFAULT_AI_BOT_USER_ID]}] : [];
+      
+      // Ensure no duplicates if a user bot has the same ID as the default (unlikely but safe)
+      const combinedDMs = [...botDMs];
+      if (defaultBotDm && !botDMs.some(dm => dm.botId === DEFAULT_AI_BOT_USER_ID)) {
+        combinedDMs.push(...globalStaticDMs);
+      }
+      setUserDirectMessages(combinedDMs);
 
-      setUserDirectMessages([...botDMs, ...globalStaticDMs]);
     } catch (error) {
       console.error("Failed to load user DMs for discover page:", error);
-      setUserDirectMessages(staticGlobalChannelsForDiscover.filter(c => c.type === 'dm').map(c => ({...c, members: [userId, c.botId!]})));
+      const defaultBotDm = staticGlobalChannelsForDiscover.find(c => c.type === 'dm' && c.botId === DEFAULT_AI_BOT_USER_ID);
+      setUserDirectMessages(defaultBotDm ? [{...defaultBotDm, members: [userId, defaultBotDm.botId!]}] : []);
     } finally {
       setIsLoadingDMs(false);
     }
@@ -85,52 +90,95 @@ export default function DiscoverShapesLayout({
     }
   }, []);
 
-  // loadUserServersForLayout REMOVED
 
   useEffect(() => {
     setIsLoadingAuth(true);
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser: FirebaseUser | null) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
         const userDocRef = doc(db, "users", firebaseUser.uid); 
-        getDoc(userDocRef).then(userSnap => {
-            let appUser: User;
-            if (userSnap.exists()) {
-                const userData = userSnap.data();
-                appUser = {
-                    uid: firebaseUser.uid,
-                    name: userData?.name || firebaseUser.displayName || firebaseUser.email || 'User',
-                    avatarUrl: userData?.avatarUrl || firebaseUser.photoURL,
-                    email: firebaseUser.email,
-                    statusMessage: userData?.statusMessage,
-                    isBot: false,
-                    shapesIncApiKey: userData?.shapesIncApiKey,
-                    shapesIncUsername: userData?.shapesIncUsername,
-                    linkedAccounts: userData?.linkedAccounts || [],
-                };
-            } else { // Should ideally not happen if signup creates user doc
-                appUser = {
-                    uid: firebaseUser.uid,
-                    name: firebaseUser.displayName || firebaseUser.email || 'User',
-                    avatarUrl: firebaseUser.photoURL,
-                    email: firebaseUser.email,
-                    isBot: false,
-                };
-            }
-            setCurrentUser(appUser);
-            loadUserDMs(firebaseUser.uid);
-            loadUserBotGroups(firebaseUser.uid); 
-            // loadUserServersForLayout(firebaseUser.uid); // REMOVED
-        });
+        const userSnap = await getDoc(userDocRef);
+        let appUser: User;
+        if (userSnap.exists()) {
+            const userData = userSnap.data();
+            appUser = {
+                uid: firebaseUser.uid,
+                name: userData?.name || firebaseUser.displayName || firebaseUser.email || 'User',
+                avatarUrl: userData?.avatarUrl || firebaseUser.photoURL,
+                email: firebaseUser.email,
+                statusMessage: userData?.statusMessage,
+                isBot: false,
+                shapesIncApiKey: userData?.shapesIncApiKey,
+                shapesIncUsername: userData?.shapesIncUsername,
+                linkedAccounts: userData?.linkedAccounts || [],
+            };
+        } else { 
+            appUser = {
+                uid: firebaseUser.uid,
+                name: firebaseUser.displayName || firebaseUser.email || 'User',
+                avatarUrl: firebaseUser.photoURL,
+                email: firebaseUser.email,
+                isBot: false,
+            };
+        }
+        setCurrentUser(appUser);
+        await loadUserDMs(firebaseUser.uid);
+        await loadUserBotGroups(firebaseUser.uid); 
       } else {
         setCurrentUser(null);
-        setUserDirectMessages(staticGlobalChannelsForDiscover.filter(c => c.type === 'dm').map(c => ({...c, members:['placeholderGuest', c.botId!]})));
+        const defaultBotDm = staticGlobalChannelsForDiscover.find(c => c.type === 'dm' && c.botId === DEFAULT_AI_BOT_USER_ID);
+        setUserDirectMessages(defaultBotDm ? [{...defaultBotDm, members:['placeholderGuest', defaultBotDm.botId!]}] : []);
         setUserBotGroups([]); 
-        // setUserServers([]); // REMOVED
       }
       setIsLoadingAuth(false);
     });
     return () => unsubscribe();
-  }, [loadUserDMs, loadUserBotGroups /*loadUserServersForLayout REMOVED*/]);
+  }, [loadUserDMs, loadUserBotGroups]);
+
+  // Effect to set initial active channel based on query params or defaults
+  useEffect(() => {
+      if (isLoadingAuth || isLoadingDMs || isLoadingBotGroups) return; // Wait for data
+
+      const channelQuery = searchParams.get('channel');
+      let newActiveChannelId: string | null = null;
+      const allDisplayableChannels = [
+          ...staticGlobalChannelsForDiscover.filter(c => c.type === 'channel'),
+          ...userDirectMessages,
+          ...userBotGroups.map(g => ({ // Transform bot groups to channel-like structure for sidebar
+            id: `group_${g.id}`, 
+            name: g.name, 
+            type: 'group', 
+            icon: Cpu, // Placeholder, adjust as needed
+            isBotGroup: true, 
+            groupId: g.id
+        }))
+      ];
+      
+      if (channelQuery && allDisplayableChannels.some(c => c.id === channelQuery)) {
+          newActiveChannelId = channelQuery;
+      } else if (allDisplayableChannels.length > 0) {
+          // Prioritize: Default DM if exists, then AI Lounge, then first DM, then first Group
+          const defaultDm = userDirectMessages.find(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
+          const aiLounge = staticGlobalChannelsForDiscover.find(c => c.id === AI_LOUNGE_CHANNEL_ID);
+          
+          if (defaultDm) newActiveChannelId = defaultDm.id;
+          else if (aiLounge) newActiveChannelId = aiLounge.id;
+          else if (userDirectMessages.length > 0) newActiveChannelId = userDirectMessages[0].id;
+          else if (userBotGroups.length > 0) newActiveChannelId = `group_${userBotGroups[0].id}`;
+          else if (staticGlobalChannelsForDiscover.filter(c => c.type === 'channel').length > 0) {
+            newActiveChannelId = staticGlobalChannelsForDiscover.filter(c => c.type === 'channel')[0].id;
+          }
+      }
+
+      if (newActiveChannelId !== activeChannelIdForDiscover) {
+        setActiveChannelIdForDiscover(newActiveChannelId);
+        // If discover page itself is a chat target, redirect appropriately
+        // For now, we assume discover-shapes page is for browsing, not active chat itself.
+        // If you want to select a channel and navigate to main chat:
+        // if (newActiveChannelId) router.push(`/?channel=${newActiveChannelId}`);
+      }
+
+  }, [isLoadingAuth, isLoadingDMs, isLoadingBotGroups, userDirectMessages, userBotGroups, searchParams, activeChannelIdForDiscover, router]);
+
 
   if (isLoadingAuth && !currentUser) {
     return (
@@ -146,7 +194,6 @@ export default function DiscoverShapesLayout({
 
   return (
     <div className="flex h-screen max-h-screen overflow-hidden bg-background">
-       {/* Simplified static rail for discover pages */}
         <div className="w-16 bg-sidebar-background border-r border-sidebar-border flex flex-col items-center py-3 space-y-3 overflow-y-auto no-scrollbar shrink-0">
             <TooltipProvider>
                 <Tooltip>
@@ -166,7 +213,7 @@ export default function DiscoverShapesLayout({
                  <Tooltip>
                     <TooltipTrigger asChild>
                         <Button
-                            variant={router.pathname === '/discover-shapes' ? "secondary" : "ghost"}
+                            variant={pathname === '/discover-shapes' ? "secondary" : "ghost"}
                             size="icon"
                             className="h-12 w-12 rounded-full text-sidebar-foreground hover:text-primary"
                             aria-label="Discover Shapes"
@@ -180,7 +227,6 @@ export default function DiscoverShapesLayout({
             </TooltipProvider>
         </div>
 
-
       <SidebarProvider defaultOpen={true}>
         {currentUser ? (
             <Sidebar collapsible="icon" variant="sidebar" side="left" className="border-r border-sidebar-border">
@@ -188,27 +234,28 @@ export default function DiscoverShapesLayout({
                     channels={globalChannelsForSidebar} 
                     directMessages={userDirectMessages}
                     botGroups={userBotGroups || []}
-                    userBots={[] as BotConfig[]} // Pass empty array as not directly needed for discover sidebar
-                    platformAis={[] as PlatformShape[]} // Pass empty array
+                    userBots={[] as BotConfig[]} 
+                    platformAis={[] as PlatformShape[]} 
                     currentUser={currentUser}
-                    activeServerId={null} 
+                    activeServerId={null} // Servers removed
                     activeChannelId={activeChannelIdForDiscover} 
-                    serverName="Discover"
+                    serverName="Discover" // Static name for this layout
                     onSelectChannel={(channelId) => {
-                        setActiveChannelIdForDiscover(channelId); 
+                        // setActiveChannelIdForDiscover(channelId); // This layout doesn't host active chat view
+                        // Instead, clicking a channel here should navigate to the main chat page with that channel
                         router.push(`/?channel=${channelId}`); 
                     }}
-                    onOpenAccountSettings={() => router.push('/')} 
-                    onAddChannel={() => {}} 
-                    onOpenCreateBotDialog={() => router.push('/')} 
-                    onOpenCreateBotGroupDialog={() => router.push('/')} 
-                    onOpenManageBotGroupDialog={(groupId) => router.push(`/?group=${groupId}`)} 
+                    onOpenAccountSettings={() => router.push('/?settings=account')} // Navigate to main page with query for settings
+                    onAddChannel={() => {}} // No channel creation in discover layout
+                    onOpenCreateBotDialog={() => router.push('/?createBot=true')} 
+                    onOpenCreateBotGroupDialog={() => router.push('/?createGroup=true')} 
+                    onOpenManageBotGroupDialog={(groupId) => router.push(`/?manageGroup=${groupId}`)} 
                     onLogout={async () => {
                       await auth.signOut();
                       router.push('/'); 
                     }}
-                    isLoadingUserBots={isLoadingDMs || isLoadingBotGroups}
-                    isLoadingServers={false} 
+                    isLoadingUserBots={isLoadingDMs || isLoadingBotGroups} // Combined loading state for DMs and Groups
+                    isLoadingServers={false} // Servers removed
                 />
             </Sidebar>
         ) : (
@@ -224,4 +271,3 @@ export default function DiscoverShapesLayout({
     </div>
   );
 }
-
