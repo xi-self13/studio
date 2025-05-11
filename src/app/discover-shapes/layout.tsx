@@ -9,7 +9,7 @@ import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import type { User, Channel, BotGroup } from '@/types'; // Server type removed
+import type { User, Channel, BotGroup, BotConfig, PlatformShape } from '@/types'; // Server type removed, Added BotConfig, PlatformShape
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore } from '@/lib/firestoreService'; // getServersForUserFromFirestore removed
@@ -188,6 +188,8 @@ export default function DiscoverShapesLayout({
                     channels={globalChannelsForSidebar} 
                     directMessages={userDirectMessages}
                     botGroups={userBotGroups || []}
+                    userBots={[] as BotConfig[]} // Pass empty array as not directly needed for discover sidebar
+                    platformAis={[] as PlatformShape[]} // Pass empty array
                     currentUser={currentUser}
                     activeServerId={null} 
                     activeChannelId={activeChannelIdForDiscover} 
@@ -196,8 +198,8 @@ export default function DiscoverShapesLayout({
                         setActiveChannelIdForDiscover(channelId); 
                         router.push(`/?channel=${channelId}`); 
                     }}
-                    onOpenAccountSettings={() => router.push('/')} // Redirect to main for account settings or implement modal here
-                    onAddChannel={() => {}} // No server-specific channels here 
+                    onOpenAccountSettings={() => router.push('/')} 
+                    onAddChannel={() => {}} 
                     onOpenCreateBotDialog={() => router.push('/')} 
                     onOpenCreateBotGroupDialog={() => router.push('/')} 
                     onOpenManageBotGroupDialog={(groupId) => router.push(`/?group=${groupId}`)} 
@@ -206,7 +208,7 @@ export default function DiscoverShapesLayout({
                       router.push('/'); 
                     }}
                     isLoadingUserBots={isLoadingDMs || isLoadingBotGroups}
-                    isLoadingServers={false} // No server specific data here
+                    isLoadingServers={false} 
                 />
             </Sidebar>
         ) : (
@@ -222,3 +224,4 @@ export default function DiscoverShapesLayout({
     </div>
   );
 }
+
