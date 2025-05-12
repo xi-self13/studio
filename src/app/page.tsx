@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -8,7 +7,7 @@ import { Sidebar, SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Share2, Copy, Globe, EyeOff, RefreshCw, MessageSquare } from 'lucide-react';
+import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Share2, Copy, Globe, EyeOff, MessageSquare } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react';
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
@@ -34,12 +33,13 @@ import {
   setTypingIndicatorInFirestore,
   removeTypingIndicatorFromFirestore,
   saveMessageToFirestore, 
-  subscribeToChannelMessages, 
+  subscribeToChannelMessages,
+  deleteMessageFromFirestore, // Added
   updateUserLastSeen,
   getAllAppUsers,
   getOrCreateDmChannelBetweenUsers,
   createUserDocument,
-  TYPING_INDICATORS_COLLECTION, // Import for direct use
+  TYPING_INDICATORS_COLLECTION,
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -68,7 +68,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 const USERS_COLLECTION = 'users';
 const TYPING_INDICATOR_TIMEOUT = 5000; 
-// const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; // Already imported from firestoreService
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT';
@@ -85,8 +84,8 @@ export default function ShapeTalkPage() {
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([]); // Includes current user, bots, and other app users for context
-  const [allAppUsers, setAllAppUsers] = useState<User[]>([]); // List of all non-bot users for DMs
+  const [users, setUsers] = useState<User[]>([]); 
+  const [allAppUsers, setAllAppUsers] = useState<User[]>([]); 
   const [userBots, setUserBots] = useState<BotConfig[]>([]);
   const [platformAndPublicAis, setPlatformAndPublicAis] = useState<PlatformShape[]>([]);
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
@@ -133,12 +132,112 @@ export default function ShapeTalkPage() {
     await saveMessageToFirestore(botMessage);
   }, []);
 
+  const processAiInteraction = useCallback(async (params: {
+    channelId: string,
+    userPrompt: string,
+    contextShapeId?: string,
+    targetBotId: string,
+    forUserId: string,
+    messageToReplaceId?: string
+  }) => {
+    const { channelId, userPrompt, contextShapeId, targetBotId, forUserId, messageToReplaceId } = params;
+    
+    if (messageToReplaceId) {
+      try {
+        await deleteMessageFromFirestore(messageToReplaceId);
+      } catch (delError) {
+        console.error("Error deleting message to replace:", delError);
+        toast({ title: "Regeneration Error", description: "Could not remove the old message.", variant: "destructive"});
+        // Optionally, decide if you want to proceed or return
+      }
+    }
+  
+    let botApiKeyToUse: string | undefined = undefined;
+    let botShapeUsernameToUse: string | undefined = undefined;
+    let botSystemPrompt: string | undefined = undefined;
+    const defaultContextShape = PREDEFINED_SHAPES[0];
+  
+    if (targetBotId === DEFAULT_AI_BOT_USER_ID) {
+      if (isApiHealthy === false) {
+        sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "The default AI is currently having connection issues. Please try again later.", "text");
+        return;
+      }
+       if (isApiHealthy === null) {
+        sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Still checking the default AI's connection. Please wait a moment.", "text");
+        return;
+      }
+      if (currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
+        botApiKeyToUse = currentUser.shapesIncApiKey;
+        botShapeUsernameToUse = currentUser.shapesIncUsername;
+      }
+    } else {
+      
+      const foundUserBot = userBots.find(b => b.id === targetBotId);
+      let fullBotConfig: BotConfig | null = foundUserBot || null;
+  
+      if (!fullBotConfig) {
+        const foundPlatformBot = platformAndPublicAis.find(p => p.id === targetBotId);
+        if (foundPlatformBot?.isUserCreated) { // User-created public bot
+            fullBotConfig = await getBotConfigFromFirestore(targetBotId);
+        } else if (foundPlatformBot) { // Platform official bot
+            botShapeUsernameToUse = foundPlatformBot.shapeUsername;
+            botSystemPrompt = foundPlatformBot.description;
+        }
+      }
+      
+      if (!fullBotConfig && !botShapeUsernameToUse) { // Still no config and not a platform official
+          fullBotConfig = await getBotConfigFromFirestore(targetBotId);
+      }
+
+      if (fullBotConfig) {
+        botShapeUsernameToUse = fullBotConfig.shapeUsername;
+        botSystemPrompt = fullBotConfig.systemPrompt;
+        if (fullBotConfig.apiKey && fullBotConfig.apiKey !== '***') {
+          botApiKeyToUse = fullBotConfig.apiKey;
+        } else if (fullBotConfig.ownerUserId === forUserId && currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
+          botApiKeyToUse = currentUser.shapesIncApiKey;
+          botShapeUsernameToUse = currentUser.shapesIncUsername; 
+        } 
+      }
+  
+      if (!botShapeUsernameToUse) {
+        sendBotMessageUtil(channelId, targetBotId, "Sorry, I'm not configured correctly (missing username).", "text");
+        return;
+      }
+    }
+  
+    try {
+      const actualContextShapeId = contextShapeId || defaultContextShape?.id;
+      if (!actualContextShapeId) {
+        sendBotMessageUtil(channelId, targetBotId, "Missing core context to interact with AI.", "text");
+        return;
+      }
+  
+      const aiResponse = await chatWithShape({
+        promptText: userPrompt,
+        contextShapeId: actualContextShapeId,
+        userId: forUserId,
+        channelId: channelId,
+        botApiKey: botApiKeyToUse,
+        botShapeUsername: botShapeUsernameToUse,
+        systemPrompt: botSystemPrompt,
+      });
+  
+      await sendBotMessageUtil(channelId, targetBotId, aiResponse.responseText, "ai_response", userPrompt, actualContextShapeId);
+  
+    } catch (error) {
+      console.error("Error in processAiInteraction calling chatWithShape:", error);
+      await sendBotMessageUtil(channelId, targetBotId, `Sorry, I encountered an error: ${(error as Error).message}`, "text");
+    }
+  }, [currentUser, isApiHealthy, userBots, platformAndPublicAis, sendBotMessageUtil, toast]);
+
+
   const loadAllAppUsers = useCallback(async () => {
     setIsLoadingAllUsers(true);
     try {
       const fetchedUsers = await getAllAppUsers();
-      setAllAppUsers(fetchedUsers.filter(u => u.uid !== currentUser?.uid)); // Exclude current user
-      setUsers(prev => { // Ensure users state also has these app users
+      setAllAppUsers(fetchedUsers.filter(u => u.uid !== currentUser?.uid)); 
+      setUsers(prev => { 
         const existingUserIds = new Set(prev.map(u => u.uid));
         const newUsersToAdd = fetchedUsers.filter(fu => !existingUserIds.has(fu.uid));
         return [...prev, ...newUsersToAdd];
@@ -237,7 +336,7 @@ export default function ShapeTalkPage() {
     });
     setDirectMessages(prevDms => {
       const existingDmIds = new Set(prevDms.map(dm => dm.id));
-      const newStaticDms = staticChannelsData.filter(sc => !existingDmIds.has(sc.id) && sc.type === 'dm' && sc.isBotChannel); // Only add static bot DMs initially
+      const newStaticDms = staticChannelsData.filter(sc => !existingDmIds.has(sc.id) && sc.type === 'dm' && sc.isBotChannel); 
       return newStaticDms.length > 0 ? [...prevDms, ...newStaticDms] : prevDms;
     });
 
@@ -255,7 +354,7 @@ export default function ShapeTalkPage() {
     }
     checkApiStatus();
     loadPlatformAndPublicAis();
-    loadAllAppUsers(); // Load all app users
+    loadAllAppUsers(); 
   }, [toast, loadPlatformAndPublicAis, loadAllAppUsers]);
 
   const loadUserBots = useCallback(async function fetchUserBotsLogic(userId: string) {
@@ -368,7 +467,7 @@ export default function ShapeTalkPage() {
           linkedAccounts: userData?.linkedAccounts || [],
           lastSeen: userData?.lastSeen ? (userData.lastSeen as Timestamp).toMillis() : Date.now(),
         };
-        await updateUserLastSeen(firebaseUser.uid); // Update lastSeen on login
+        await updateUserLastSeen(firebaseUser.uid); 
       } else {
         const newName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous User';
         appUser = {
@@ -383,11 +482,10 @@ export default function ShapeTalkPage() {
           linkedAccounts: [],
           lastSeen: Date.now(),
         };
-        // Use createUserDocument which includes lastSeen
         await createUserDocument(appUser);
       }
       setCurrentUser(appUser);
-      setUsers(prevUsers => { // Update users state
+      setUsers(prevUsers => { 
         const otherUsers = prevUsers.filter(u => u.uid !== appUser.uid);
         return [appUser, ...otherUsers];
       });
@@ -408,7 +506,7 @@ export default function ShapeTalkPage() {
 
       await loadUserBots(firebaseUser.uid); 
       await loadUserBotGroups(firebaseUser.uid); 
-      await loadAllAppUsers(); // Load other users
+      await loadAllAppUsers(); 
       setAuthError(null);
     } else { 
       setCurrentUser(null);
@@ -496,7 +594,7 @@ export default function ShapeTalkPage() {
         const aiLounge = channels.find(c => c.id === AI_LOUNGE_CHANNEL_ID);
 
         if (defaultDm) newActiveChannelId = defaultDm.id;
-        else if (firstUserToUserDm) newActiveChannelId = firstUserToUserDm.id; // Prioritize user DMs
+        else if (firstUserToUserDm) newActiveChannelId = firstUserToUserDm.id; 
         else if (firstUserDm) newActiveChannelId = firstUserDm.id;
         else if (firstGroup) newActiveChannelId = firstGroup.id;
         else if (aiLounge) newActiveChannelId = aiLounge.id;
@@ -594,14 +692,14 @@ export default function ShapeTalkPage() {
           avatarUrl: user.photoURL || null,
           isBot:false,
           linkedAccounts: [{ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName }],
-          lastSeen: Date.now(), // set lastSeen on creation
+          lastSeen: Date.now(), 
         });
       } else {
          await updateDoc(userDocRef, { 
             name: user.displayName || userSnap.data()?.name,
             avatarUrl: user.photoURL || userSnap.data()?.avatarUrl,
             linkedAccounts: arrayUnion({ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName }),
-            lastSeen: serverTimestamp(), // update lastSeen
+            lastSeen: serverTimestamp(), 
         });
       }
       toast({ title: "Logged In Successfully!", description: `Welcome back, ${user.displayName || user.email}!` });
@@ -650,7 +748,7 @@ export default function ShapeTalkPage() {
         avatarUrl: null,
         isBot:false,
         linkedAccounts: [{ providerId: 'password', email: userCredential.user.email }],
-        lastSeen: Date.now(), // set lastSeen on creation
+        lastSeen: Date.now(), 
       });
       toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
     } catch (error: any) {
@@ -661,7 +759,7 @@ export default function ShapeTalkPage() {
   };
   const handleLogout = async () => {
     try {
-      if(currentUser) await updateUserProfileInFirestore(currentUser.uid, { lastSeen: Date.now() }); // Update last seen before logging out
+      if(currentUser) await updateUserProfileInFirestore(currentUser.uid, { lastSeen: Date.now() }); 
       await signOut(auth);
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
     } catch (error: any) {
@@ -690,14 +788,12 @@ export default function ShapeTalkPage() {
           sendBotMessageUtil(activeChannelId, currentChannel.botId, greeting);
           setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [activeChannelId]: true }));
       } else if (currentChannel?.isUserDm && !hasSentInitialBotMessageForChannel[activeChannelId] && !messagesExistForChannel){
-        // For user DMs, no initial bot message, but mark as "interacted"
         setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [activeChannelId]: true }));
       }
     }
   }, [currentUser, activeChannelId, channels, directMessages, userBots, platformAndPublicAis, isApiHealthy, messages, sendBotMessageUtil, hasSentInitialBotMessageForChannel]);
 
   const handleSelectChannel = (channelId: string) => {
-    // setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [channelId]: false })); // Reset might not be needed or desired for initial greeting
     setActiveChannelId(channelId);
     if (currentUser) updateUserLastSeen(currentUser.uid);
   };
@@ -707,11 +803,9 @@ export default function ShapeTalkPage() {
     
     try {
       const dmChannel = await getOrCreateDmChannelBetweenUsers(currentUser.uid, targetUser.uid, targetUser.name || 'User');
-      // Check if this DM channel already exists in local state to prevent duplicates
       if (!directMessages.find(dm => dm.id === dmChannel.id)) {
         setDirectMessages(prevDms => [...prevDms, dmChannel]);
       }
-       // Ensure the target user is in the `users` state for avatar/name display
       if (!users.find(u => u.uid === targetUser.uid)) {
         setUsers(prev => [...prev, targetUser]);
       }
@@ -749,70 +843,13 @@ export default function ShapeTalkPage() {
     const currentChannel = allChannels.find(c => c.id === channelId);
 
     if (currentChannel && currentChannel.isBotChannel && content.type === 'text') {
-      let botUserIdToUse = DEFAULT_AI_BOT_USER_ID;
-      let botApiKeyToUse: string | undefined = undefined;
-      let botShapeUsernameToUse: string | undefined = undefined;
-      let botSystemPrompt: string | undefined = undefined;
-      
-      const foundBotConfig = userBots.find(b => b.id === currentChannel.botId) || 
-                             platformAndPublicAis.find(p => p.id === currentChannel.botId && p.isUserCreated) as (PlatformShape & { apiKey?: string }); 
-
-      if (currentChannel.botId && currentChannel.botId !== DEFAULT_AI_BOT_USER_ID) {
-          const actualBotConfig = userBots.find(b => b.id === currentChannel.botId) || await getBotConfigFromFirestore(currentChannel.botId);
-        if (actualBotConfig) { 
-          botUserIdToUse = actualBotConfig.id;
-          if (actualBotConfig.apiKey && actualBotConfig.apiKey !== '***') {
-            botApiKeyToUse = actualBotConfig.apiKey; 
-          }
-          botShapeUsernameToUse = actualBotConfig.shapeUsername;
-          botSystemPrompt = actualBotConfig.systemPrompt;
-        } else if (foundBotConfig && foundBotConfig.shapeUsername) { 
-            botUserIdToUse = foundBotConfig.id;
-            botShapeUsernameToUse = foundBotConfig.shapeUsername;
-            botSystemPrompt = (foundBotConfig as BotConfig).systemPrompt || foundBotConfig.description; 
-        }
-         else {
-          sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Sorry, I couldn't find the complete configuration for this bot.", "text");
-          return;
-        }
-      } else { 
-        if (isApiHealthy === false) { 
-            sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm having trouble connecting to my services right now. Please try again later.", "text");
-            return;
-        }
-         if (isApiHealthy === null) { 
-            sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "I'm still checking my connection. Please wait a moment.", "text");
-            return;
-        }
-        if (currentUser.shapesIncApiKey && currentUser.shapesIncUsername) {
-            botApiKeyToUse = currentUser.shapesIncApiKey;
-            botShapeUsernameToUse = currentUser.shapesIncUsername;
-        } 
-      }
-
-      try {
-        const contextShapeForBot = PREDEFINED_SHAPES[0];
-        if (!contextShapeForBot) { 
-            sendBotMessageUtil(channelId, botUserIdToUse, "Sorry, I'm missing some core context to operate.", "text");
-            return;
-        }
-
-        const aiResponse = await chatWithShape({
-          promptText: content.text,
-          contextShapeId: contextShapeForBot.id,
-          userId: currentUser.uid,
-          channelId: channelId,
-          botApiKey: botApiKeyToUse, 
-          botShapeUsername: botShapeUsernameToUse, 
-          systemPrompt: botSystemPrompt,
-        });
-
-        await sendBotMessageUtil(channelId, botUserIdToUse, aiResponse.responseText, "ai_response", content.text, contextShapeForBot.id);
-
-      } catch (error) {
-        console.error("Error calling Shapes API:", error);
-        await sendBotMessageUtil(channelId, botUserIdToUse, `Sorry, I encountered an error: ${(error as Error).message}`, "text");
-      }
+      await processAiInteraction({
+        channelId,
+        userPrompt: content.text,
+        targetBotId: currentChannel.botId!,
+        forUserId: currentUser.uid,
+        contextShapeId: PREDEFINED_SHAPES[0]?.id 
+      });
     } else if (currentChannel && currentChannel.isAiLounge && content.type === 'text') {
       if (isApiHealthy === false || isApiHealthy === null || platformAndPublicAis.length === 0) {
         let loungeMessage = "The AI Lounge is quiet...";
@@ -822,35 +859,14 @@ export default function ShapeTalkPage() {
         await sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, loungeMessage, "text");
         return;
       }
-      
       const randomPlatformAi = platformAndPublicAis[Math.floor(Math.random() * platformAndPublicAis.length)];
-      try {
-        const contextShapeForLounge = PREDEFINED_SHAPES[0]; 
-        if (!contextShapeForLounge) { 
-             await sendBotMessageUtil(channelId, randomPlatformAi.id, "Missing context for the lounge chat.", "text");
-            return;
-        }
-        
-        let apiKeyForLounge = undefined;
-        const userBotMatch = userBots.find(ub => ub.id === randomPlatformAi.id && ub.isPublic);
-        if (userBotMatch && userBotMatch.apiKey && userBotMatch.apiKey !== '***') {
-            apiKeyForLounge = userBotMatch.apiKey;
-        }
-
-        const aiResponse = await chatWithShape({
-          promptText: content.text,
-          contextShapeId: contextShapeForLounge.id,
-          userId: currentUser.uid,
-          channelId: channelId,
-          botShapeUsername: randomPlatformAi.shapeUsername, 
-          botApiKey: apiKeyForLounge,
-          systemPrompt: randomPlatformAi.description, 
-        });
-        await sendBotMessageUtil(channelId, randomPlatformAi.id, aiResponse.responseText, "ai_response", content.text, contextShapeForLounge.id);
-      } catch (error) {
-         console.error("Error in AI Lounge chat:", error);
-         await sendBotMessageUtil(channelId, randomPlatformAi.id, `An error occurred in the lounge: ${(error as Error).message}`, "text");
-      }
+      await processAiInteraction({
+        channelId,
+        userPrompt: content.text,
+        targetBotId: randomPlatformAi.id,
+        forUserId: currentUser.uid,
+        contextShapeId: PREDEFINED_SHAPES[0]?.id,
+      });
     } else if (currentChannel && currentChannel.isBotGroup && currentChannel.groupId && content.type === 'text') {
         if (isApiHealthy === false || isApiHealthy === null) {
             const healthMessage = isApiHealthy === false ? "Group chat unavailable, core services seem down." : "Checking group chat connections...";
@@ -866,62 +882,15 @@ export default function ShapeTalkPage() {
         }
         
         for (const respondingBotId of groupConfig.botIds) {
-            let botToRespond: BotConfig | PlatformShape | null = null;
-            let botApiKeyToUse: string | undefined = undefined;
-            let botShapeUsernameToUse: string | undefined = undefined;
-            let botSystemPrompt: string | undefined = undefined;
-
-            botToRespond = userBots.find(b => b.id === respondingBotId) as BotConfig | null;
-            if (!botToRespond) {
-                botToRespond = platformAndPublicAis.find(p => p.id === respondingBotId) as PlatformShape | null;
-            }
-            if (!botToRespond) { 
-                botToRespond = await getBotConfigFromFirestore(respondingBotId);
-            }
-
-            if (!botToRespond) {
-                await sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, `Configuration for bot ${respondingBotId} in group not found. Skipping.`, "text");
-                continue; 
-            }
-
-            botShapeUsernameToUse = botToRespond.shapeUsername;
-            if ('apiKey' in botToRespond && botToRespond.apiKey && botToRespond.apiKey !== '***') {
-                botApiKeyToUse = botToRespond.apiKey;
-            }
-            if ('systemPrompt' in botToRespond && botToRespond.systemPrompt) {
-                botSystemPrompt = botToRespond.systemPrompt;
-            } else if ('description' in botToRespond) { 
-                botSystemPrompt = botToRespond.description;
-            }
-            
-            if (!botShapeUsernameToUse) {
-                await sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, `Shape username for ${botToRespond.name} is missing. Skipping.`, "text");
-                continue; 
-            }
-
-            try {
-                const contextShapeForGroup = PREDEFINED_SHAPES[0]; 
-                if (!contextShapeForGroup) {
-                    await sendBotMessageUtil(channelId, respondingBotId, "Missing core context for group chat. Skipping.", "text");
-                    continue;
-                }
-                const aiResponse = await chatWithShape({
-                    promptText: content.text,
-                    contextShapeId: contextShapeForGroup.id,
-                    userId: currentUser.uid, 
-                    channelId: channelId,     
-                    botApiKey: botApiKeyToUse,
-                    botShapeUsername: botShapeUsernameToUse,
-                    systemPrompt: botSystemPrompt || `You are ${botToRespond.name} in the group "${groupConfig.name}".`,
-                });
-                await sendBotMessageUtil(channelId, respondingBotId, aiResponse.responseText, "ai_response", content.text, contextShapeForGroup.id);
-            } catch (error) {
-                console.error(`Error calling Shapes API for bot ${respondingBotId} in group ${groupConfig.name}:`, error);
-                await sendBotMessageUtil(channelId, respondingBotId, `Sorry, I encountered an error: ${(error as Error).message}`, "text");
-            }
+            await processAiInteraction({
+                channelId,
+                userPrompt: content.text,
+                targetBotId: respondingBotId,
+                forUserId: currentUser.uid,
+                contextShapeId: PREDEFINED_SHAPES[0]?.id, 
+            });
         } 
     }
-    // No specific handling for user-to-user DMs here for AI response, as it's direct chat.
   };
 
   const handleSendAiResponseMessage = async (
@@ -945,6 +914,39 @@ export default function ShapeTalkPage() {
       responseData.sourceShapeId
     );
   };
+
+  const handleDeleteAiMessage = async (messageId: string) => {
+    try {
+      await deleteMessageFromFirestore(messageId);
+      toast({ title: "Message Deleted", description: "The AI message has been removed." });
+    } catch (error) {
+      console.error("Error deleting AI message:", error);
+      toast({ title: "Deletion Failed", description: (error as Error).message, variant: "destructive" });
+    }
+  };
+
+  const handleRegenerateAiMessage = async (aiMessageToRegenerate: Message) => {
+    if (!currentUser || !activeChannelId) {
+      toast({ title: "Error", description: "Cannot regenerate message. User or channel not available.", variant: "destructive"});
+      return;
+    }
+    if (aiMessageToRegenerate.content.type !== 'ai_response' || !aiMessageToRegenerate.content.prompt) {
+      toast({ title: "Error", description: "This message cannot be regenerated.", variant: "destructive"});
+      return;
+    }
+  
+    toast({ title: "Regenerating...", description: "Asking the AI to try again." });
+    
+    await processAiInteraction({
+      channelId: activeChannelId,
+      userPrompt: aiMessageToRegenerate.content.prompt,
+      contextShapeId: aiMessageToRegenerate.content.sourceShapeId,
+      targetBotId: aiMessageToRegenerate.userId, 
+      forUserId: currentUser.uid,
+      messageToReplaceId: aiMessageToRegenerate.id,
+    });
+  };
+
 
   const handleOpenAccountSettings = () => setIsAccountSettingsDialogOpen(true);
   
@@ -1239,7 +1241,7 @@ export default function ShapeTalkPage() {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data(); 
         
-        if (data && data.timestamp instanceof Timestamp) { // Check if timestamp is a Firestore Timestamp
+        if (data && data.timestamp && typeof data.timestamp.toMillis === 'function') { 
           const indicatorTimestamp = data.timestamp.toMillis();
           const indicator: TypingIndicator = {
             userId: data.userId,
@@ -1255,15 +1257,9 @@ export default function ShapeTalkPage() {
             needsBatchCommit = true;
           }
         } else if (data && data.timestamp === null) {
-          // Timestamp is null, likely serverTimestamp() hasn't resolved yet.
-          // This is a transient state, usually resolves quickly.
           console.log(`Typing indicator ${docSnap.id} has a null timestamp, likely pending server write.`);
         } else if (data) {
-          // Timestamp is not a Timestamp object or is otherwise invalid
           console.warn(`Typing indicator ${docSnap.id} has an invalid or missing timestamp field:`, data.timestamp);
-          // Optionally, delete malformed indicators if they persist
-          // batch.delete(docSnap.ref);
-          // needsBatchCommit = true;
         }
       });
 
@@ -1411,7 +1407,7 @@ export default function ShapeTalkPage() {
               activeChannel={activeChannelDetails}
               messages={messages.filter(msg => msg.channelId === activeChannelId)}
               currentUser={currentUser}
-              users={users} // Pass the comprehensive users list
+              users={users} 
               userBots={userBots}
               onSendMessage={handleSendMessage}
               onSendAiResponseMessage={handleSendAiResponseMessage}
@@ -1420,6 +1416,8 @@ export default function ShapeTalkPage() {
               onOpenManageGroupDialog={currentUser && activeChannelDetails?.isBotGroup && activeChannelDetails?.groupId ? handleOpenManageBotGroupDialog : undefined}
               onUserTyping={handleUserTyping}
               typingUsers={typingUsers.filter(tu => tu.channelId === activeChannelId && tu.userId !== currentUser?.uid)}
+              onDeleteAiMessage={handleDeleteAiMessage} 
+              onRegenerateAiMessage={handleRegenerateAiMessage} 
             />
             </>
           )}
@@ -1475,4 +1473,3 @@ export default function ShapeTalkPage() {
 }
 
     
-

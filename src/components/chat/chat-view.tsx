@@ -1,11 +1,10 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from 'react';
 import type { Message, User, Channel, BotConfig, TypingIndicator } from '@/types';
 import { MessageItem } from './message-item';
 import { MessageInput } from './message-input';
-import { AiChatDialog } from '@/components/ai/image-generator-dialog'; // This seems to be misnamed, it's an AI Chat dialog
+import { AiChatDialog } from '@/components/ai/image-generator-dialog'; 
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from '@/components/ui/button';
@@ -34,8 +33,10 @@ interface ChatViewProps {
   onOpenBotSettings: (botId: string) => void;
   onDeleteBot: (botId: string) => Promise<void>; 
   onOpenManageGroupDialog?: (groupId: string) => void; 
-  onUserTyping: (isTyping: boolean) => void; // New prop
-  typingUsers: TypingIndicator[]; // New prop
+  onUserTyping: (isTyping: boolean) => void;
+  typingUsers: TypingIndicator[];
+  onDeleteAiMessage: (messageId: string) => Promise<void>; // Added
+  onRegenerateAiMessage: (message: Message) => Promise<void>; // Added
 }
 
 export function ChatView({
@@ -51,6 +52,8 @@ export function ChatView({
   onOpenManageGroupDialog,
   onUserTyping,
   typingUsers,
+  onDeleteAiMessage, // Added
+  onRegenerateAiMessage, // Added
 }: ChatViewProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -60,7 +63,7 @@ export function ChatView({
     if (viewportRef.current) {
       viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
     }
-  }, [messages, activeChannel, typingUsers]); // Added typingUsers to dependencies
+  }, [messages, activeChannel, typingUsers]); 
 
   const handleOpenAiShapeChatDialog = () => {
     if (!currentUser) {
@@ -91,16 +94,14 @@ export function ChatView({
                 isOpen={isAiChatDialogOpen}
                 onOpenChange={setIsAiChatDialogOpen}
                 onAiResponse={async (responseData) => {
-                  // Ensure activeChannel is not null before trying to access its id
                   if (activeChannel) {
                     onSendAiResponseMessage(activeChannel.id, responseData);
                   } else {
-                    // Handle the case where activeChannel is null, perhaps show a toast
                     console.error("Cannot send AI response, no active channel selected.");
                   }
                 }}
                 currentUserId={currentUser?.uid}
-                activeChannelId={activeChannel?.id || null} // Pass null if activeChannel is null
+                activeChannelId={activeChannel?.id || null} 
             />
          )}
       </div>
@@ -112,8 +113,13 @@ export function ChatView({
   const getUserById = (userId: string): User | { uid: string, name: string, avatarUrl?: string | null, isBot?: boolean, dataAiHint?: string } => {
     const foundUser = users.find(u => u.uid === userId);
     if (foundUser) return foundUser;
+    // Check userBots which includes platform shapes transformed into BotConfig like structures if they are user-created
     const foundBotConfig = userBots.find(b => b.id === userId);
     if (foundBotConfig) return { uid: userId, name: foundBotConfig.name, avatarUrl: foundBotConfig.avatarUrl, isBot: true, dataAiHint: 'bot avatar'};
+    // Fallback for platform bots not in userBots (e.g. official platform shapes)
+    const platformBot = users.find(u => u.uid === userId && u.isBot);
+    if (platformBot) return platformBot;
+    
     return { uid: userId, name: 'Unknown User', isBot: false, dataAiHint: 'unknown user', avatarUrl: null };
   };
 
@@ -121,7 +127,7 @@ export function ChatView({
     if (!activeChannel) return <Hash className="h-5 w-5 mr-2 text-muted-foreground" />;
     if (activeChannel.type === 'dm') {
       const otherUserId = activeChannel.members?.find(id => id !== currentUser?.uid);
-      const otherUser = otherUserId && users.length > 0 ? users.find(u => u.uid === otherUserId) : null;
+      const otherUser = otherUserId ? getUserById(otherUserId) : null;
 
 
       if (otherUser) {
@@ -149,7 +155,7 @@ export function ChatView({
   const isOwnBotGroupChannel = activeChannel.isBotGroup && activeChannel.groupId && onOpenManageGroupDialog;
   
   const typingUsersText = typingUsers
-    .filter(tu => tu.userId !== currentUser.uid) // Don't show self-typing
+    .filter(tu => tu.userId !== currentUser.uid) 
     .map(tu => tu.userName)
     .join(', ');
 
@@ -235,6 +241,8 @@ export function ChatView({
                 message={msg}
                 sender={sender}
                 isOwnMessage={currentUser ? msg.userId === currentUser.uid : false}
+                onDeleteAiMessage={sender.isBot ? onDeleteAiMessage : undefined}
+                onRegenerateAiMessage={sender.isBot && msg.content.type === 'ai_response' && msg.content.prompt ? onRegenerateAiMessage : undefined}
               />
             );
           })}

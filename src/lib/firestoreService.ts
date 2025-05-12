@@ -520,6 +520,18 @@ export async function saveMessageToFirestore(message: Message): Promise<void> {
   }
 }
 
+export async function deleteMessageFromFirestore(messageId: string): Promise<void> {
+  try {
+    const messageDocRef = doc(db, MESSAGES_COLLECTION, messageId);
+    await deleteDoc(messageDocRef);
+    console.log(`Message with ID: ${messageId} deleted.`);
+  } catch (error) {
+    console.error('Error deleting message from Firestore:', error);
+    throw new Error('Failed to delete message.');
+  }
+}
+
+
 export function subscribeToChannelMessages(
   channelId: string,
   onMessagesUpdate: (messages: Message[]) => void
