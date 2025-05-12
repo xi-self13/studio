@@ -9,6 +9,7 @@ export interface User {
   linkedAccounts?: Array<{ providerId: string; displayName?: string | null; email?: string | null }>; // displayName and email can be null
   shapesIncApiKey?: string;
   shapesIncUsername?: string;
+  lastSeen?: number | null; // Timestamp of last activity
 }
 
 export interface Shape {
@@ -47,7 +48,8 @@ export interface Channel {
   botId?: string; 
   isAiLounge?: boolean; 
   isBotGroup?: boolean; 
-  groupId?: string; 
+  groupId?: string;
+  isUserDm?: boolean; // Indicates a DM between two regular users
 }
 
 export interface BotConfig {
@@ -90,5 +92,3 @@ export interface TypingIndicator {
   channelId: string;
   timestamp: number; 
 }
-
-// Server interface removed

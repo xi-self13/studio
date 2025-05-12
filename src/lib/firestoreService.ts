@@ -1,5 +1,4 @@
 // src/lib/firestoreService.ts
-// 'use server'; // Removed: This directive was causing issues with non-async functions like onSnapshot.
 
 import { db } from './firebase';
 import {
@@ -20,30 +19,33 @@ import {
   Timestamp,
   orderBy,
   onSnapshot,
-  Unsubscribe
+  Unsubscribe,
+  limit
 } from 'firebase/firestore'; 
-import type { BotConfig, PlatformShape, BotGroup, TypingIndicator, User, Message } from '@/types'; 
+import type { BotConfig, PlatformShape, BotGroup, TypingIndicator, User, Message, Channel } from '@/types'; 
 
 const USER_BOTS_COLLECTION = 'userBots'; 
 const PLATFORM_SHAPES_COLLECTION = 'platformShapes'; 
 const BOT_GROUPS_COLLECTION = 'botGroups';
-const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; 
+export const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; 
 const USERS_COLLECTION = 'users';
 const MESSAGES_COLLECTION = 'messages';
+const CHANNELS_COLLECTION = 'channels';
 
 
 // --- User Profile Functions ---
 export async function updateUserProfileInFirestore(userId: string, profileData: Partial<User>): Promise<void> {
   try {
     const userDocRef = doc(db, USERS_COLLECTION, userId);
-    // Ensure that undefined values are converted to null for Firestore or handled appropriately
     const dataToUpdate: any = {};
-    if (profileData.name !== undefined) dataToUpdate.name = profileData.name;
-    if (profileData.avatarUrl !== undefined) dataToUpdate.avatarUrl = profileData.avatarUrl === '' ? null : profileData.avatarUrl;
-    if (profileData.statusMessage !== undefined) dataToUpdate.statusMessage = profileData.statusMessage === '' ? null : profileData.statusMessage;
-    if (profileData.shapesIncApiKey !== undefined) dataToUpdate.shapesIncApiKey = profileData.shapesIncApiKey === '' ? null : profileData.shapesIncApiKey;
-    if (profileData.shapesIncUsername !== undefined) dataToUpdate.shapesIncUsername = profileData.shapesIncUsername === '' ? null : profileData.shapesIncUsername;
-    if (profileData.linkedAccounts !== undefined) dataToUpdate.linkedAccounts = profileData.linkedAccounts;
+    // Only include fields that are explicitly provided in profileData
+    if ('name' in profileData) dataToUpdate.name = profileData.name;
+    if ('avatarUrl' in profileData) dataToUpdate.avatarUrl = profileData.avatarUrl === '' ? null : profileData.avatarUrl;
+    if ('statusMessage' in profileData) dataToUpdate.statusMessage = profileData.statusMessage === '' ? null : profileData.statusMessage;
+    if ('shapesIncApiKey' in profileData) dataToUpdate.shapesIncApiKey = profileData.shapesIncApiKey === '' ? null : profileData.shapesIncApiKey;
+    if ('shapesIncUsername' in profileData) dataToUpdate.shapesIncUsername = profileData.shapesIncUsername === '' ? null : profileData.shapesIncUsername;
+    if ('linkedAccounts' in profileData) dataToUpdate.linkedAccounts = profileData.linkedAccounts;
+    if ('lastSeen' in profileData) dataToUpdate.lastSeen = profileData.lastSeen ? Timestamp.fromMillis(profileData.lastSeen) : null;
 
 
     await updateDoc(userDocRef, dataToUpdate);
@@ -51,6 +53,66 @@ export async function updateUserProfileInFirestore(userId: string, profileData: 
   } catch (error) {
     console.error('Error updating user profile in Firestore:', error);
     throw new Error('Failed to update user profile.');
+  }
+}
+
+export async function createUserDocument(userData: User): Promise<void> {
+    const userDocRef = doc(db, USERS_COLLECTION, userData.uid);
+    try {
+        await setDoc(userDocRef, {
+            uid: userData.uid,
+            email: userData.email || null,
+            name: userData.name || 'Anonymous User',
+            avatarUrl: userData.avatarUrl || null,
+            isBot: userData.isBot || false,
+            statusMessage: userData.statusMessage || null,
+            shapesIncApiKey: userData.shapesIncApiKey || null,
+            shapesIncUsername: userData.shapesIncUsername || null,
+            linkedAccounts: userData.linkedAccounts || [],
+            lastSeen: serverTimestamp(), // Set initial lastSeen
+        });
+    } catch (error) {
+        console.error("Error creating user document:", error);
+        throw new Error("Failed to create user document.");
+    }
+}
+
+export async function updateUserLastSeen(userId: string): Promise<void> {
+  try {
+    const userDocRef = doc(db, USERS_COLLECTION, userId);
+    await updateDoc(userDocRef, { lastSeen: serverTimestamp() });
+  } catch (error) {
+    console.error(`Error updating lastSeen for user ${userId}:`, error);
+    // Non-critical, so don't throw
+  }
+}
+
+export async function getAllAppUsers(): Promise<User[]> {
+  try {
+    const usersCollectionRef = collection(db, USERS_COLLECTION);
+    const q = query(usersCollectionRef, where('isBot', '!=', true)); // Exclude bots
+    const querySnapshot = await getDocs(q);
+    
+    const appUsers: User[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      appUsers.push({
+        uid: docSnap.id,
+        name: data.name,
+        avatarUrl: data.avatarUrl,
+        email: data.email,
+        isBot: data.isBot || false,
+        statusMessage: data.statusMessage,
+        lastSeen: data.lastSeen ? (data.lastSeen as Timestamp).toMillis() : null,
+        linkedAccounts: data.linkedAccounts,
+        shapesIncApiKey: data.shapesIncApiKey,
+        shapesIncUsername: data.shapesIncUsername,
+      });
+    });
+    return appUsers;
+  } catch (error) {
+    console.error('Error retrieving all app users from Firestore:', error);
+    return [];
   }
 }
 
@@ -411,19 +473,50 @@ export async function removeBotFromGroupInFirestore(groupId: string, botId: stri
   }
 }
 
+// --- Channel Functions (especially for DMs) ---
+export async function getOrCreateDmChannelBetweenUsers(user1Uid: string, user2Uid: string, user2Name: string): Promise<Channel> {
+  const uids = [user1Uid, user2Uid].sort();
+  const channelId = `dm_${uids[0]}_${uids[1]}`;
+  
+  const channelDocRef = doc(db, CHANNELS_COLLECTION, channelId);
+  const channelSnap = await getDoc(channelDocRef);
+
+  if (channelSnap.exists()) {
+    const data = channelSnap.data();
+    return {
+      id: channelSnap.id,
+      name: data.name,
+      type: data.type,
+      members: data.members,
+      isUserDm: data.isUserDm,
+    } as Channel;
+  } else {
+    const newChannelData: Channel = {
+      id: channelId,
+      name: user2Name, // Name of the other user in the DM
+      type: 'dm',
+      members: [user1Uid, user2Uid],
+      isUserDm: true, // Mark as a user-to-user DM
+    };
+    await setDoc(channelDocRef, {
+        ...newChannelData,
+        createdAt: serverTimestamp(), // Add a creation timestamp
+    });
+    return newChannelData;
+  }
+}
+
+
 // --- Message Functions ---
 export async function saveMessageToFirestore(message: Message): Promise<void> {
   try {
     const messageDocRef = doc(db, MESSAGES_COLLECTION, message.id);
     await setDoc(messageDocRef, {
       ...message,
-      timestamp: Timestamp.fromMillis(message.timestamp), // Store as Firestore Timestamp
+      timestamp: Timestamp.fromMillis(message.timestamp), 
     });
-    // console.log(`Message ${message.id} saved to channel ${message.channelId}.`);
   } catch (error) {
     console.error('Error saving message to Firestore:', error);
-    // Do not throw here, as it might interrupt chat flow for a non-critical error
-    // Consider logging to a more robust system in production
   }
 }
 
@@ -443,14 +536,13 @@ export function subscribeToChannelMessages(
         userId: data.userId,
         channelId: data.channelId,
         content: data.content,
-        timestamp: (data.timestamp as Timestamp).toMillis(), // Convert Firestore Timestamp to number
+        timestamp: (data.timestamp as Timestamp).toMillis(), 
         reactions: data.reactions,
       } as Message);
     });
     onMessagesUpdate(messages);
   }, (error) => {
     console.error(`Error listening to messages for channel ${channelId}:`, error);
-    // Handle error appropriately, maybe call onMessagesUpdate with an empty array or an error state
   });
 
   return unsubscribe;
@@ -480,7 +572,6 @@ export async function removeTypingIndicatorFromFirestore(channelId: string, user
   }
 }
 
-// Function to clean up old typing indicators (could be run periodically or via a cloud function)
 export async function cleanupOldTypingIndicators(timeoutMillis: number = 5000): Promise<void> {
   try {
     const cutoff = Timestamp.fromMillis(Date.now() - timeoutMillis);

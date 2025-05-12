@@ -8,7 +8,7 @@ import { Sidebar, SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Share2, Copy, Globe, EyeOff, RefreshCw } from 'lucide-react';
+import { PanelLeft, Bot, LogIn, LogOut, UserPlus, Cpu, Shapes, Settings, Compass, Users as UsersIcon, Trash2, Edit3, UserCog, Users2 as BotGroupsIcon, Loader2, Share2, Copy, Globe, EyeOff, RefreshCw, MessageSquare } from 'lucide-react';
 import { useToast } from "@/hooks/use-toast";
 import { Hash } from 'lucide-react';
 import { chatWithShape } from '@/ai/flows/chat-with-shape-flow';
@@ -34,8 +34,12 @@ import {
   updateUserProfileInFirestore, 
   setTypingIndicatorInFirestore,
   removeTypingIndicatorFromFirestore,
-  saveMessageToFirestore, // Added
-  subscribeToChannelMessages, // Added
+  saveMessageToFirestore, 
+  subscribeToChannelMessages, 
+  updateUserLastSeen,
+  getAllAppUsers,
+  getOrCreateDmChannelBetweenUsers,
+  createUserDocument,
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -70,10 +74,9 @@ const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat';
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT';
 const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global'; 
 
-// Define staticChannelsData at module scope to be accessible by handleAuthStateChangeLogic
 const staticChannelsData: Channel[] = [
   { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'dm', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID, members: ['placeholderCurrentUser', DEFAULT_AI_BOT_USER_ID] }, 
-  { id: AI_LOUNGE_CHANNEL_ID, name: 'AI Lounge', type: 'channel', icon: Cpu, isAiLounge: true }, 
+  { id: AI_LOUNGE_CHANNEL_ID, name: 'AI Lounge', type: 'channel', icon: MessageSquare, isAiLounge: true }, 
 ];
 
 export default function ShapeTalkPage() {
@@ -82,7 +85,8 @@ export default function ShapeTalkPage() {
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<User[]>([]); // Includes current user, bots, and other app users for context
+  const [allAppUsers, setAllAppUsers] = useState<User[]>([]); // List of all non-bot users for DMs
   const [userBots, setUserBots] = useState<BotConfig[]>([]);
   const [platformAndPublicAis, setPlatformAndPublicAis] = useState<PlatformShape[]>([]);
   const [isApiHealthy, setIsApiHealthy] = useState<boolean | null>(null);
@@ -95,6 +99,8 @@ export default function ShapeTalkPage() {
   const [isLoadingUserBots, setIsLoadingUserBots] = useState(false);
   const [isLoadingPlatformAis, setIsLoadingPlatformAis] = useState(false);
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
+  const [isLoadingAllUsers, setIsLoadingAllUsers] = useState(false);
+
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -108,7 +114,7 @@ export default function ShapeTalkPage() {
 
   const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const messageListenerUnsubscribeRef = useRef<Unsubscribe | null>(null); // For chat history listener
+  const messageListenerUnsubscribeRef = useRef<Unsubscribe | null>(null); 
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -124,11 +130,26 @@ export default function ShapeTalkPage() {
       content: type === 'ai_response' ? { type, textResponse: text, prompt, sourceShapeId } : { type, text },
       timestamp: Date.now(),
     };
-    // Local state update will be handled by Firestore listener now for messages from others
-    // For bot messages sent by current user's action, we might still want local immediate update or rely on listener
-    // setMessages(prev => [...prev, botMessage]); // Potentially remove if listener updates state
     await saveMessageToFirestore(botMessage);
   }, []);
+
+  const loadAllAppUsers = useCallback(async () => {
+    setIsLoadingAllUsers(true);
+    try {
+      const fetchedUsers = await getAllAppUsers();
+      setAllAppUsers(fetchedUsers.filter(u => u.uid !== currentUser?.uid)); // Exclude current user
+      setUsers(prev => { // Ensure users state also has these app users
+        const existingUserIds = new Set(prev.map(u => u.uid));
+        const newUsersToAdd = fetchedUsers.filter(fu => !existingUserIds.has(fu.uid));
+        return [...prev, ...newUsersToAdd];
+      });
+    } catch (error) {
+      console.error("Failed to load all app users:", error);
+      toast({ title: "Error Loading Users", description: "Could not fetch other users.", variant: "destructive" });
+    } finally {
+      setIsLoadingAllUsers(false);
+    }
+  }, [toast, currentUser?.uid]);
 
   const loadPlatformAndPublicAis = useCallback(async function fetchPlatformAndPublicAisLogic() {
     setIsLoadingPlatformAis(true);
@@ -216,7 +237,7 @@ export default function ShapeTalkPage() {
     });
     setDirectMessages(prevDms => {
       const existingDmIds = new Set(prevDms.map(dm => dm.id));
-      const newStaticDms = staticChannelsData.filter(sc => !existingDmIds.has(sc.id) && sc.type === 'dm');
+      const newStaticDms = staticChannelsData.filter(sc => !existingDmIds.has(sc.id) && sc.type === 'dm' && sc.isBotChannel); // Only add static bot DMs initially
       return newStaticDms.length > 0 ? [...prevDms, ...newStaticDms] : prevDms;
     });
 
@@ -234,7 +255,8 @@ export default function ShapeTalkPage() {
     }
     checkApiStatus();
     loadPlatformAndPublicAis();
-  }, [toast, loadPlatformAndPublicAis]);
+    loadAllAppUsers(); // Load all app users
+  }, [toast, loadPlatformAndPublicAis, loadAllAppUsers]);
 
   const loadUserBots = useCallback(async function fetchUserBotsLogic(userId: string) {
     setIsLoadingUserBots(true);
@@ -268,13 +290,13 @@ export default function ShapeTalkPage() {
       });
       
       setDirectMessages(prevDms => {
-         const existingUserDmIds = new Set(prevDms.filter(dm => botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId))).map(dm => dm.id));
+         const existingUserDmIds = new Set(prevDms.filter(dm => dm.isBotChannel && botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId))).map(dm => dm.id));
          const newBotDmsToAdd = botDMs.filter(ndm => !existingUserDmIds.has(ndm.id));
          
-         const defaultBotDmForCurrentUser = prevDms.find(dm => dm.botId === DEFAULT_AI_BOT_USER_ID && dm.members?.includes(userId));
+         const defaultBotDmForCurrentUser = prevDms.find(dm => dm.isBotChannel && dm.botId === DEFAULT_AI_BOT_USER_ID && dm.members?.includes(userId));
          let otherDms = prevDms.filter(dm => 
-            !botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId)) && 
-            !(dm.botId === DEFAULT_AI_BOT_USER_ID && dm.members?.includes(userId))
+            !(dm.isBotChannel && botUsers.find(bu => dm.botId === bu.uid && dm.members?.includes(userId))) && 
+            !(dm.isBotChannel && dm.botId === DEFAULT_AI_BOT_USER_ID && dm.members?.includes(userId))
          ); 
 
          let finalDms = [...otherDms, ...newBotDmsToAdd];
@@ -344,7 +366,9 @@ export default function ShapeTalkPage() {
           shapesIncApiKey: userData?.shapesIncApiKey || undefined,
           shapesIncUsername: userData?.shapesIncUsername || undefined,
           linkedAccounts: userData?.linkedAccounts || [],
+          lastSeen: userData?.lastSeen ? (userData.lastSeen as Timestamp).toMillis() : Date.now(),
         };
+        await updateUserLastSeen(firebaseUser.uid); // Update lastSeen on login
       } else {
         const newName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous User';
         appUser = {
@@ -357,29 +381,21 @@ export default function ShapeTalkPage() {
           shapesIncApiKey: undefined,
           shapesIncUsername: undefined,
           linkedAccounts: [],
+          lastSeen: Date.now(),
         };
-        await setDoc(userDocRef, { 
-          uid: appUser.uid,
-          email: appUser.email,
-          name: appUser.name,
-          avatarUrl: appUser.avatarUrl || null,
-          statusMessage: appUser.statusMessage || null,
-          shapesIncApiKey: null,
-          shapesIncUsername: null,
-          linkedAccounts: [],
-        });
+        // Use createUserDocument which includes lastSeen
+        await createUserDocument(appUser);
       }
       setCurrentUser(appUser);
-      setUsers(prevUsers => {
-        const otherUsers = prevUsers.filter(u => u.uid !== appUser.uid && u.uid !== DEFAULT_AI_BOT_USER_ID);
-        const defaultBot = prevUsers.find(u => u.uid === DEFAULT_AI_BOT_USER_ID);
-        return [appUser, ...(defaultBot ? [defaultBot] : []), ...otherUsers];
+      setUsers(prevUsers => { // Update users state
+        const otherUsers = prevUsers.filter(u => u.uid !== appUser.uid);
+        return [appUser, ...otherUsers];
       });
 
       const defaultBotDmForUser = staticChannelsData.find(c => c.id === DEFAULT_BOT_CHANNEL_ID && c.type === 'dm');
       if (defaultBotDmForUser) {
         setDirectMessages(prevDms => {
-            const existingDefaultDmIndex = prevDms.findIndex(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
+            const existingDefaultDmIndex = prevDms.findIndex(dm => dm.isBotChannel && dm.botId === DEFAULT_AI_BOT_USER_ID);
             const updatedDefaultDm = {...defaultBotDmForUser, members: [appUser.uid, DEFAULT_AI_BOT_USER_ID]};
             if(existingDefaultDmIndex > -1) {
                 const newDms = [...prevDms];
@@ -392,11 +408,13 @@ export default function ShapeTalkPage() {
 
       await loadUserBots(firebaseUser.uid); 
       await loadUserBotGroups(firebaseUser.uid); 
+      await loadAllAppUsers(); // Load other users
       setAuthError(null);
     } else { 
       setCurrentUser(null);
       setUsers(prevUsers => prevUsers.filter(u => u.isBot)); 
       setUserBots([]);
+      setAllAppUsers([]);
       
       const defaultGlobalDmForLogout = staticChannelsData.find(c => c.id === DEFAULT_BOT_CHANNEL_ID && c.type === 'dm');
       if (defaultGlobalDmForLogout) {
@@ -415,7 +433,7 @@ export default function ShapeTalkPage() {
     }
     setIsLoadingAuth(false); 
   }, [
-      loadUserBots, loadUserBotGroups, toast 
+      loadUserBots, loadUserBotGroups, toast, loadAllAppUsers
   ]);
   
   useEffect(() => {
@@ -424,7 +442,7 @@ export default function ShapeTalkPage() {
   }, [handleAuthStateChangeLogic]); 
 
   useEffect(() => {
-    if (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis) {
+    if (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers) {
       return; 
     }
 
@@ -471,12 +489,14 @@ export default function ShapeTalkPage() {
     } else if (currentUser) {
       const currentActiveIsRelevant = activeChannelId && allAvailableChannelsAndDMs.some(c => c.id === activeChannelId);
       if (!currentActiveIsRelevant || !activeChannelId) { 
-        const defaultDm = directMessages.find(c => c.botId === DEFAULT_AI_BOT_USER_ID && c.members?.includes(currentUser.uid));
-        const firstUserDm = directMessages.find(c => c.type === 'dm' && c.botId !== DEFAULT_AI_BOT_USER_ID && c.members?.includes(currentUser.uid));
+        const defaultDm = directMessages.find(c => c.isBotChannel && c.botId === DEFAULT_AI_BOT_USER_ID && c.members?.includes(currentUser.uid));
+        const firstUserDm = directMessages.find(c => c.isBotChannel && c.botId !== DEFAULT_AI_BOT_USER_ID && c.members?.includes(currentUser.uid));
+        const firstUserToUserDm = directMessages.find(c => c.isUserDm && c.members?.includes(currentUser.uid));
         const firstGroup = channels.find(c => c.isBotGroup && c.members?.includes(currentUser.uid));
         const aiLounge = channels.find(c => c.id === AI_LOUNGE_CHANNEL_ID);
 
         if (defaultDm) newActiveChannelId = defaultDm.id;
+        else if (firstUserToUserDm) newActiveChannelId = firstUserToUserDm.id; // Prioritize user DMs
         else if (firstUserDm) newActiveChannelId = firstUserDm.id;
         else if (firstGroup) newActiveChannelId = firstGroup.id;
         else if (aiLounge) newActiveChannelId = aiLounge.id;
@@ -500,10 +520,9 @@ export default function ShapeTalkPage() {
 
   }, [
     currentUser, channels, directMessages, activeChannelId, searchParams, router, botGroups, toast,
-    isLoadingAuth, isLoadingUserBots, isLoadingBotGroups, isLoadingPlatformAis
+    isLoadingAuth, isLoadingUserBots, isLoadingBotGroups, isLoadingPlatformAis, isLoadingAllUsers
   ]);
 
-  // Effect for loading messages for the active channel
   useEffect(() => {
     if (messageListenerUnsubscribeRef.current) {
       messageListenerUnsubscribeRef.current();
@@ -511,25 +530,19 @@ export default function ShapeTalkPage() {
     }
 
     if (activeChannelId) {
-      setMessages([]); // Clear messages for previous channel
-      // console.log(`Subscribing to messages for channel: ${activeChannelId}`);
-      // The subscribeToChannelMessages function needs to be callable from client-side.
-      // If firestoreService.ts is 'use server', this direct call for onSnapshot won't work as intended.
-      // Assuming it has been refactored or can be called from client context for this to work.
+      setMessages([]); 
       messageListenerUnsubscribeRef.current = subscribeToChannelMessages(
         activeChannelId,
         (fetchedMessages) => {
-          // console.log(`Received ${fetchedMessages.length} messages for ${activeChannelId}`);
           setMessages(fetchedMessages);
         }
       );
     } else {
-      setMessages([]); // No active channel, clear messages
+      setMessages([]); 
     }
 
     return () => {
       if (messageListenerUnsubscribeRef.current) {
-        // console.log("Unsubscribing from message listener");
         messageListenerUnsubscribeRef.current();
         messageListenerUnsubscribeRef.current = null;
       }
@@ -574,21 +587,21 @@ export default function ShapeTalkPage() {
       const userDocRef = doc(db, USERS_COLLECTION, user.uid);
       const userSnap = await getDoc(userDocRef);
       if (!userSnap.exists()) {
-        await setDoc(userDocRef, {
+        await createUserDocument({
           uid: user.uid,
           email: user.email,
           name: user.displayName || user.email?.split('@')[0] || 'Anonymous User',
           avatarUrl: user.photoURL || null,
-          statusMessage: null,
-          shapesIncApiKey: null,
-          shapesIncUsername: null,
+          isBot:false,
           linkedAccounts: [{ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName }],
+          lastSeen: Date.now(), // set lastSeen on creation
         });
       } else {
          await updateDoc(userDocRef, { 
             name: user.displayName || userSnap.data()?.name,
             avatarUrl: user.photoURL || userSnap.data()?.avatarUrl,
-            linkedAccounts: arrayUnion({ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName })
+            linkedAccounts: arrayUnion({ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName }),
+            lastSeen: serverTimestamp(), // update lastSeen
         });
       }
       toast({ title: "Logged In Successfully!", description: `Welcome back, ${user.displayName || user.email}!` });
@@ -608,7 +621,8 @@ export default function ShapeTalkPage() {
     setIsLoadingAuth(true);
     setAuthError(null);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      await updateUserLastSeen(userCredential.user.uid);
       toast({ title: "Logged In Successfully!" });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Login");
@@ -629,15 +643,14 @@ export default function ShapeTalkPage() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const newName = email.split('@')[0];
       await updateProfile(userCredential.user, { displayName: newName });
-      await setDoc(doc(db, USERS_COLLECTION, userCredential.user.uid), {
+      await createUserDocument({
         uid: userCredential.user.uid,
         email: userCredential.user.email,
         name: newName,
         avatarUrl: null,
-        statusMessage: null,
-        shapesIncApiKey: null,
-        shapesIncUsername: null,
+        isBot:false,
         linkedAccounts: [{ providerId: 'password', email: userCredential.user.email }],
+        lastSeen: Date.now(), // set lastSeen on creation
       });
       toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
     } catch (error: any) {
@@ -648,6 +661,7 @@ export default function ShapeTalkPage() {
   };
   const handleLogout = async () => {
     try {
+      if(currentUser) await updateUserProfileInFirestore(currentUser.uid, { lastSeen: Date.now() }); // Update last seen before logging out
       await signOut(auth);
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
     } catch (error: any) {
@@ -659,7 +673,6 @@ export default function ShapeTalkPage() {
   useEffect(() => {
     if (currentUser && activeChannelId) {
       const currentChannel = [...channels, ...directMessages].find(c => c.id === activeChannelId);
-      // Check if messages for this channel have already been loaded by the listener
       const messagesExistForChannel = messages.some(msg => msg.channelId === activeChannelId);
 
       if (currentChannel?.isBotChannel && currentChannel.botId && !hasSentInitialBotMessageForChannel[activeChannelId] && !messagesExistForChannel) {
@@ -676,20 +689,48 @@ export default function ShapeTalkPage() {
           }
           sendBotMessageUtil(activeChannelId, currentChannel.botId, greeting);
           setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [activeChannelId]: true }));
+      } else if (currentChannel?.isUserDm && !hasSentInitialBotMessageForChannel[activeChannelId] && !messagesExistForChannel){
+        // For user DMs, no initial bot message, but mark as "interacted"
+        setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [activeChannelId]: true }));
       }
     }
   }, [currentUser, activeChannelId, channels, directMessages, userBots, platformAndPublicAis, isApiHealthy, messages, sendBotMessageUtil, hasSentInitialBotMessageForChannel]);
 
   const handleSelectChannel = (channelId: string) => {
-    setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [channelId]: false })); // Reset for new channel
+    // setHasSentInitialBotMessageForChannel(prev => ({ ...prev, [channelId]: false })); // Reset might not be needed or desired for initial greeting
     setActiveChannelId(channelId);
+    if (currentUser) updateUserLastSeen(currentUser.uid);
   };
+
+  const handleSelectUserForDm = async (targetUser: User) => {
+    if (!currentUser || !targetUser || currentUser.uid === targetUser.uid) return;
+    
+    try {
+      const dmChannel = await getOrCreateDmChannelBetweenUsers(currentUser.uid, targetUser.uid, targetUser.name || 'User');
+      // Check if this DM channel already exists in local state to prevent duplicates
+      if (!directMessages.find(dm => dm.id === dmChannel.id)) {
+        setDirectMessages(prevDms => [...prevDms, dmChannel]);
+      }
+       // Ensure the target user is in the `users` state for avatar/name display
+      if (!users.find(u => u.uid === targetUser.uid)) {
+        setUsers(prev => [...prev, targetUser]);
+      }
+      setActiveChannelId(dmChannel.id);
+      if (currentUser) updateUserLastSeen(currentUser.uid);
+
+    } catch (error) {
+      console.error("Error creating/getting DM channel:", error);
+      toast({ title: "DM Error", description: "Could not start a chat with this user.", variant: "destructive" });
+    }
+  };
+
 
   const handleSendMessage = async (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => {
     if (!currentUser || !channelId) { 
         toast({title: "Error", description: "Cannot send message. User or channel not available.", variant: "destructive"});
         return;
     }
+    await updateUserLastSeen(currentUser.uid);
 
     const newMessage: Message = {
       id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -698,7 +739,6 @@ export default function ShapeTalkPage() {
       content,
       timestamp: Date.now(),
     };
-    // setMessages(prev => [...prev, newMessage]); // Optimistic update, will be overwritten by listener or can be removed if listener is fast enough
     await saveMessageToFirestore(newMessage);
 
 
@@ -881,6 +921,7 @@ export default function ShapeTalkPage() {
             }
         } 
     }
+    // No specific handling for user-to-user DMs here for AI response, as it's direct chat.
   };
 
   const handleSendAiResponseMessage = async (
@@ -891,6 +932,7 @@ export default function ShapeTalkPage() {
       toast({ title: "Error", description: "Cannot send AI response: Missing user or channel context.", variant: "destructive"});
       return;
     }
+    await updateUserLastSeen(currentUser.uid);
     const activeCh = [...channels, ...directMessages].find(c => c.id === channelId);
     const botIdToUse = activeCh?.isBotChannel && activeCh.botId ? activeCh.botId : DEFAULT_AI_BOT_USER_ID;
 
@@ -929,7 +971,7 @@ export default function ShapeTalkPage() {
       setDirectMessages(prev => prev.filter(dm => dm.botId !== botId || dm.id !== `dm_${botId}_${currentUser.uid}`));
       setUsers(prev => prev.filter(u => u.uid !== botId));
       if (activeChannelId === `dm_${botId}_${currentUser.uid}`) {
-        const globalDefaultDM = directMessages.find(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
+        const globalDefaultDM = directMessages.find(dm => dm.isBotChannel && dm.botId === DEFAULT_AI_BOT_USER_ID);
         setActiveChannelId(globalDefaultDM?.id || channels.find(c => c.id === AI_LOUNGE_CHANNEL_ID)?.id || null); 
       }
       toast({ title: "Bot Deleted", description: `${botToDelete.name} has been deleted.` });
@@ -945,6 +987,7 @@ export default function ShapeTalkPage() {
     const newCurrentUser = { ...currentUser, ...updatedUserData };
     setCurrentUser(newCurrentUser);
     setUsers(prevUsers => prevUsers.map(u => u.uid === newCurrentUser.uid ? newCurrentUser : u));
+    if(updatedUserData.lastSeen) await updateUserLastSeen(currentUser.uid);
   };
 
   const handleAddChannel = () => { 
@@ -1091,7 +1134,7 @@ export default function ShapeTalkPage() {
       setBotGroups(prev => prev.filter(g => g.id !== groupId));
       setChannels(prev => prev.filter(c => !(c.isBotGroup && c.groupId === groupId) ));
       if (activeChannelId === `group_${groupId}`) {
-        const globalDefaultDM = directMessages.find(dm => dm.botId === DEFAULT_AI_BOT_USER_ID);
+        const globalDefaultDM = directMessages.find(dm => dm.isBotChannel && dm.botId === DEFAULT_AI_BOT_USER_ID);
         setActiveChannelId(globalDefaultDM?.id || channels.find(c => c.id === AI_LOUNGE_CHANNEL_ID)?.id || null); 
       }
       toast({ title: "Group Deleted", description: "The bot group has been deleted." });
@@ -1167,10 +1210,6 @@ export default function ShapeTalkPage() {
         channelId: activeChannelId,
         timestamp: Date.now() 
       });
-      // Optimistic update for local user's typing status can be tricky with Firestore listener
-      // For now, we rely on Firestore to update the typingUsers list for others.
-      // To show self-typing immediately, would need to handle it separately or merge carefully.
-
       typingTimeoutRef.current = setTimeout(async () => {
         await removeTypingIndicatorFromFirestore(activeChannelId, currentUser.uid);
       }, TYPING_INDICATOR_TIMEOUT);
@@ -1318,14 +1357,15 @@ export default function ShapeTalkPage() {
                 <MainChannelSidebarContent
                     channels={channelsForMainSidebar}
                     directMessages={directMessagesForMainSidebar}
+                    allAppUsers={allAppUsers}
                     botGroups={botGroupsForMainSidebar}
                     currentUser={currentUser}
                     userBots={userBots}
                     platformAis={platformAndPublicAis}
-                    activeServerId={null} 
                     activeChannelId={activeChannelId}
                     serverName={"ShapeTalk"} 
                     onSelectChannel={handleSelectChannel}
+                    onSelectUserForDm={handleSelectUserForDm}
                     onOpenAccountSettings={handleOpenAccountSettings}
                     onAddChannel={() => handleAddChannel()} 
                     onOpenCreateBotDialog={() => setIsCreateBotDialogOpen(true)}
@@ -1333,7 +1373,7 @@ export default function ShapeTalkPage() {
                     onOpenManageBotGroupDialog={handleOpenManageBotGroupDialog}
                     onLogout={handleLogout}
                     isLoadingUserBots={isLoadingUserBots || isLoadingBotGroups}
-                    isLoadingServers={false} 
+                    isLoadingAllUsers={isLoadingAllUsers}
                 />
             </Sidebar>
          ) : (
@@ -1341,12 +1381,12 @@ export default function ShapeTalkPage() {
          )}
 
         <SidebarInset className="flex flex-col flex-1 min-w-0 h-full max-h-screen relative m-0 rounded-none shadow-none p-0">
-          { (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis) && !activeChannelDetails && currentUser && (
+          { (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers) && !activeChannelDetails && currentUser && (
             <div className="flex-1 flex items-center justify-center bg-background text-foreground">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           )}
-          { !((isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis) && !activeChannelDetails && currentUser) && (
+          { !((isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers) && !activeChannelDetails && currentUser) && (
             <>
             <div className="md:hidden p-2 border-b border-border sticky top-0 bg-background z-20">
               <MobileSidebarTrigger className="h-8 w-8">
@@ -1357,7 +1397,7 @@ export default function ShapeTalkPage() {
               activeChannel={activeChannelDetails}
               messages={messages.filter(msg => msg.channelId === activeChannelId)}
               currentUser={currentUser}
-              users={users}
+              users={users} // Pass the comprehensive users list
               userBots={userBots}
               onSendMessage={handleSendMessage}
               onSendAiResponseMessage={handleSendAiResponseMessage}
@@ -1419,6 +1459,5 @@ export default function ShapeTalkPage() {
     </div>
   );
 }
-
 
     
