@@ -1,8 +1,8 @@
-
 // src/lib/firebase.ts
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore'; // Added Firestore
+import { getFirestore, type Firestore } from 'firebase/firestore';
+import { getStorage, type FirebaseStorage } from 'firebase/storage'; // Added Storage
 
 // IMPORTANT: Make sure these environment variables are set in your .env.local file (or equivalent for your deployment).
 // NEXT_PUBLIC_FIREBASE_API_KEY=your_api_key
@@ -31,7 +31,8 @@ const firebaseConfig = {
 
 let app: FirebaseApp;
 let auth: Auth;
-let db: Firestore; // Added Firestore instance
+let db: Firestore;
+let storage: FirebaseStorage; // Added FirebaseStorage instance
 
 if (getApps().length === 0) {
   if (!firebaseConfig.apiKey) {
@@ -44,6 +45,7 @@ if (getApps().length === 0) {
 }
 
 auth = getAuth(app);
-db = getFirestore(app); // Initialize Firestore
+db = getFirestore(app);
+storage = getStorage(app); // Initialize Storage
 
-export { app, auth, db };
+export { app, auth, db, storage };

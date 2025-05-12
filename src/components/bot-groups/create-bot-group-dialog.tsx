@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState } from 'react';
@@ -31,7 +32,7 @@ import { Users2 as BotGroupsIcon, Loader2 } from 'lucide-react';
 const formSchema = z.object({
   name: z.string().min(2, 'Group name must be at least 2 characters.').max(50, 'Group name must be 50 characters or less.'),
   description: z.string().max(500, "Description too long (max 500 chars).").optional(),
-  avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
+  // avatarUrl removed - will be set via ManageBotGroupDialog
 });
 
 type CreateBotGroupFormValues = z.infer<typeof formSchema>;
@@ -39,7 +40,7 @@ type CreateBotGroupFormValues = z.infer<typeof formSchema>;
 interface CreateBotGroupDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
-  onBotGroupCreated: (botGroupData: Omit<BotGroup, 'id' | 'ownerUserId'>) => void; // Changed to pass data for creation
+  onBotGroupCreated: (botGroupData: Omit<BotGroup, 'id' | 'ownerUserId'>) => void;
   currentUserId: string;
 }
 
@@ -57,7 +58,6 @@ export function CreateBotGroupDialog({
     defaultValues: {
       name: '',
       description: '',
-      avatarUrl: '',
     },
   });
 
@@ -71,19 +71,16 @@ export function CreateBotGroupDialog({
       const newBotGroupData: Omit<BotGroup, 'id' | 'ownerUserId'> = {
         name: data.name,
         description: data.description || undefined,
-        avatarUrl: data.avatarUrl || undefined,
-        botIds: [], // New groups start with no bots
-        memberUserIds: [currentUserId], // Owner is implicitly a member
+        avatarUrl: undefined, // Avatar will be set via ManageBotGroupDialog
+        botIds: [], 
+        memberUserIds: [currentUserId], 
       };
       
-      onBotGroupCreated(newBotGroupData); // Parent will handle actual Firestore write
+      onBotGroupCreated(newBotGroupData); 
 
-      // Toast message will be handled by parent after successful Firestore write
       form.reset();
       onOpenChange(false);
     } catch (error) {
-      // This catch block might not be hit if onBotGroupCreated handles errors internally
-      // and doesn't re-throw. If it does re-throw, this will catch it.
       console.error("Error submitting bot group creation form:", error);
       const errorMessage = error instanceof Error ? error.message : "An unknown error occurred.";
       toast({
@@ -107,7 +104,7 @@ export function CreateBotGroupDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><BotGroupsIcon className="text-primary" /> Create New Bot Group</DialogTitle>
           <DialogDescription>
-            Organize your AI bots into groups for easier management and interaction.
+            Organize your AI bots into groups. You can set the group avatar in the group's settings after creation.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
@@ -138,19 +135,6 @@ export function CreateBotGroupDialog({
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="avatarUrl"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Group Avatar URL (Optional)</FormLabel>
-                  <FormControl>
-                    <Input type="url" placeholder="https://example.com/group-avatar.png" {...field} value={field.value ?? ''}/>
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="outline" disabled={isLoading}>
@@ -172,4 +156,3 @@ export function CreateBotGroupDialog({
     </Dialog>
   );
 }
-

@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -30,15 +30,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Cpu, Loader2, Save } from 'lucide-react';
+import { Cpu, Loader2, Save, UploadCloud } from 'lucide-react';
 import { saveUserBotConfigToFirestore } from '@/lib/firestoreService';
+import { uploadImageAndGetURL } from '@/lib/storageService';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 const formSchema = z.object({
   name: z.string().min(2, 'Bot name must be at least 2 characters.').max(50, 'Bot name must be 50 characters or less.'),
   systemPrompt: z.string().max(1000, "System prompt too long (max 1000 chars).").optional(),
   greetingMessage: z.string().max(500, "Greeting message too long (max 500 chars).").optional(),
   isPublic: z.boolean().default(false).optional(),
-  avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
+  // avatarUrl is handled by file upload
 });
 
 type BotSettingsFormValues = z.infer<typeof formSchema>;
@@ -57,16 +59,18 @@ export function BotSettingsDialog({
   onBotConfigUpdated,
 }: BotSettingsDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const form = useForm<BotSettingsFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: botConfig?.name || '',
-      systemPrompt: botConfig?.systemPrompt || '',
-      greetingMessage: botConfig?.greetingMessage || '',
-      isPublic: botConfig?.isPublic || false,
-      avatarUrl: botConfig?.avatarUrl || '',
+      name: '',
+      systemPrompt: '',
+      greetingMessage: '',
+      isPublic: false,
     },
   });
 
@@ -77,11 +81,23 @@ export function BotSettingsDialog({
         systemPrompt: botConfig.systemPrompt || '',
         greetingMessage: botConfig.greetingMessage || '',
         isPublic: botConfig.isPublic || false,
-        avatarUrl: botConfig.avatarUrl || '',
       });
+      setAvatarPreview(botConfig.avatarUrl || null);
+      setAvatarFile(null);
     }
   }, [botConfig, form, isOpen]);
 
+  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const onSubmit: SubmitHandler<BotSettingsFormValues> = async (data) => {
     if (!botConfig) {
@@ -89,14 +105,21 @@ export function BotSettingsDialog({
       return;
     }
     setIsLoading(true);
+    let newAvatarUrl = botConfig.avatarUrl;
+
     try {
+      if (avatarFile) {
+        const storagePath = `avatars/bots/${botConfig.id}/${Date.now()}-${avatarFile.name}`;
+        newAvatarUrl = await uploadImageAndGetURL(avatarFile, storagePath);
+      }
+
       const updatedBotConfig: BotConfig = {
-        ...botConfig, // Preserve existing fields like id, ownerUserId, apiKey, shapeUsername
+        ...botConfig, 
         name: data.name,
         systemPrompt: data.systemPrompt || undefined,
         greetingMessage: data.greetingMessage || undefined,
         isPublic: data.isPublic || false,
-        avatarUrl: data.avatarUrl || undefined,
+        avatarUrl: newAvatarUrl || undefined,
       };
 
       await saveUserBotConfigToFirestore(updatedBotConfig);
@@ -116,7 +139,7 @@ export function BotSettingsDialog({
     }
   };
 
-  if (!botConfig) return null; // Should not happen if dialog is opened correctly
+  if (!botConfig) return null; 
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => {
@@ -133,6 +156,25 @@ export function BotSettingsDialog({
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto p-1 pr-3">
+            <div className="flex flex-col items-center space-y-2">
+                <Avatar className="h-24 w-24 ring-2 ring-primary ring-offset-2 ring-offset-background">
+                  <AvatarImage src={avatarPreview || undefined} alt={botConfig.name || "Bot avatar"} data-ai-hint="bot avatar large"/>
+                  <AvatarFallback className="text-3xl bg-muted">
+                    <Bot size={48} className="text-primary" />
+                  </AvatarFallback>
+                </Avatar>
+                <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+                  <UploadCloud className="mr-2 h-4 w-4" /> Change Bot Avatar
+                </Button>
+                <Input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleAvatarChange} 
+                  className="hidden" 
+                  accept="image/*" 
+                />
+                 {avatarFile && <p className="text-xs text-muted-foreground truncate max-w-xs">Selected: {avatarFile.name}</p>}
+              </div>
             <FormField
               control={form.control}
               name="name"
@@ -174,19 +216,6 @@ export function BotSettingsDialog({
                    <FormFieldDescription className="text-xs">
                     The first message this bot will send when a user starts a DM. (Max 500 chars)
                   </FormFieldDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="avatarUrl"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Avatar URL (Optional)</FormLabel>
-                  <FormControl>
-                    <Input type="url" placeholder="https://example.com/avatar.png" {...field} value={field.value ?? ''}/>
-                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

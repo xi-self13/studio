@@ -23,7 +23,7 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-  FormDescription as FormFieldDescription, // Renamed to avoid conflict with DialogDescription
+  FormDescription as FormFieldDescription, 
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -37,7 +37,7 @@ const formSchema = z.object({
   shapeUsername: z.string().min(1, 'Shapes.inc username is required.'),
   apiKey: z.string().min(1, 'Shapes.inc API key is required.'),
   isPublic: z.boolean().default(false).optional(),
-  avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
+  // avatarUrl removed - will be set via BotSettingsDialog
 });
 
 type CreateBotFormValues = z.infer<typeof formSchema>;
@@ -65,7 +65,6 @@ export function CreateBotDialog({
       shapeUsername: '',
       apiKey: '',
       isPublic: false,
-      avatarUrl: '',
     },
   });
 
@@ -83,14 +82,13 @@ export function CreateBotDialog({
         apiKey: data.apiKey, 
         ownerUserId: currentUserId,
         isPublic: data.isPublic || false,
-        avatarUrl: data.avatarUrl || undefined, // Store undefined if empty string
-        // systemPrompt and greetingMessage will be set via BotSettingsDialog
+        avatarUrl: undefined, // Avatar will be set via BotSettingsDialog
       };
 
       await saveUserBotConfigToFirestore(newBotConfig); 
       
       onBotCreated(newBotConfig); 
-      toast({ title: "Bot Created!", description: `${data.name} is ready to chat.` });
+      toast({ title: "Bot Created!", description: `${data.name} is ready. Customize its avatar and personality in its settings.` });
       form.reset();
       onOpenChange(false);
     } catch (error) {
@@ -118,7 +116,7 @@ export function CreateBotDialog({
           <DialogTitle className="flex items-center gap-2"><Cpu className="text-primary" /> Create Your AI Bot</DialogTitle>
           <DialogDescription>
             Configure your own AI bot using its Shapes.inc username and API key.
-            Public bots will be discoverable by others.
+            You can set the avatar and personality in the bot's settings after creation.
             <strong className="block mt-1 text-destructive-foreground/80">Note: API keys are sensitive. This is for demonstration. In a real app, handle keys securely.</strong>
           </DialogDescription>
         </DialogHeader>
@@ -158,19 +156,6 @@ export function CreateBotDialog({
                   <FormLabel>Shapes.inc API Key</FormLabel>
                   <FormControl>
                     <Input type="password" placeholder="your-shapes-api-key" {...field} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="avatarUrl"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Avatar URL (Optional)</FormLabel>
-                  <FormControl>
-                    <Input type="url" placeholder="https://example.com/avatar.png" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>

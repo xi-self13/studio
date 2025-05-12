@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -28,22 +28,24 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { UserCog, Loader2, Link as LinkIcon, CheckCircle, AlertCircle } from 'lucide-react';
-import { updateProfile, GoogleAuthProvider, linkWithPopup, type UserCredential, type AuthProvider } from 'firebase/auth';
+import { UserCog, Loader2, Link as LinkIcon, CheckCircle, AlertCircle, UploadCloud } from 'lucide-react';
+import { updateProfile, GoogleAuthProvider, linkWithPopup, type AuthProvider } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { updateUserProfileInFirestore } from '@/lib/firestoreService';
 import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { Separator } from '@/components/ui/separator';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { uploadImageAndGetURL } from '@/lib/storageService';
 
 const formSchema = z.object({
   displayName: z.string().min(2, 'Display name must be at least 2 characters.').max(50, 'Display name must be 50 characters or less.'),
   statusMessage: z.string().max(100, "Status message must be 100 characters or less.").optional(),
-  avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
+  // avatarUrl is handled by file upload, not direct URL input in this version
   shapesIncUsername: z.string().optional().or(z.literal('')),
   shapesIncApiKey: z.string().optional().or(z.literal('')),
 }).refine(data => (data.shapesIncUsername && data.shapesIncApiKey) || (!data.shapesIncUsername && !data.shapesIncApiKey), {
   message: "Both Shapes.inc Username and API Key must be provided, or neither.",
-  path: ["shapesIncApiKey"], // Or shapesIncUsername, path for error display
+  path: ["shapesIncApiKey"], 
 });
 
 
@@ -67,16 +69,18 @@ export function AccountSettingsDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [isTestingShapesApi, setIsTestingShapesApi] = useState(false);
   const [shapesApiStatus, setShapesApiStatus] = useState<{ok: boolean, message: string} | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const form = useForm<AccountSettingsFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      displayName: currentUser?.name || '',
-      statusMessage: currentUser?.statusMessage || '',
-      avatarUrl: currentUser?.avatarUrl || '',
-      shapesIncUsername: currentUser?.shapesIncUsername || '',
-      shapesIncApiKey: currentUser?.shapesIncApiKey || '',
+      displayName: '',
+      statusMessage: '',
+      shapesIncUsername: '',
+      shapesIncApiKey: '',
     },
   });
 
@@ -85,13 +89,26 @@ export function AccountSettingsDialog({
       form.reset({
         displayName: currentUser.name || '',
         statusMessage: currentUser.statusMessage || '',
-        avatarUrl: currentUser.avatarUrl || '',
         shapesIncUsername: currentUser.shapesIncUsername || '',
         shapesIncApiKey: currentUser.shapesIncApiKey || '',
       });
-      setShapesApiStatus(null); // Reset API status on dialog open/user change
+      setAvatarPreview(currentUser.avatarUrl || null);
+      setAvatarFile(null);
+      setShapesApiStatus(null); 
     }
   }, [currentUser, form, isOpen]);
+
+  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleTestShapesApi = async () => {
     const username = form.getValues("shapesIncUsername");
@@ -104,8 +121,6 @@ export function AccountSettingsDialog({
     setIsTestingShapesApi(true);
     setShapesApiStatus(null);
     try {
-      // Temporarily override process.env for checkShapesApiHealth if it relies on them
-      // This is a common pattern for testing; adapt if checkShapesApiHealth can take params
       const originalEnvKey = process.env.SHAPESINC_API_KEY;
       const originalEnvUser = process.env.SHAPESINC_SHAPE_USERNAME;
       process.env.SHAPESINC_API_KEY = apiKey;
@@ -113,7 +128,6 @@ export function AccountSettingsDialog({
 
       const result = await checkShapesApiHealth();
       
-      // Restore original env vars
       process.env.SHAPESINC_API_KEY = originalEnvKey;
       process.env.SHAPESINC_SHAPE_USERNAME = originalEnvUser;
 
@@ -135,29 +149,34 @@ export function AccountSettingsDialog({
       return;
     }
     setIsLoading(true);
+    let newAvatarUrl = currentUser.avatarUrl;
+
     try {
+      if (avatarFile) {
+        const storagePath = `avatars/users/${currentUser.uid}/${Date.now()}-${avatarFile.name}`;
+        newAvatarUrl = await uploadImageAndGetURL(avatarFile, storagePath);
+      }
+
       await updateProfile(auth.currentUser, {
         displayName: data.displayName,
-        photoURL: data.avatarUrl || null,
+        photoURL: newAvatarUrl || null,
       });
 
       const firestoreUpdateData: Partial<User> = {
         name: data.displayName,
         statusMessage: data.statusMessage || null,
-        avatarUrl: data.avatarUrl || null,
+        avatarUrl: newAvatarUrl || null,
         shapesIncUsername: data.shapesIncUsername || null,
-        shapesIncApiKey: data.shapesIncApiKey || null, // Store as is, handle security implications externally
+        shapesIncApiKey: data.shapesIncApiKey || null, 
       };
       
       await updateUserProfileInFirestore(currentUser.uid, firestoreUpdateData);
-
-      onAccountUpdate(firestoreUpdateData); // Pass only updated fields
-
+      onAccountUpdate(firestoreUpdateData); 
       toast({ title: "Account Updated", description: "Your account details have been saved." });
       onOpenChange(false);
     } catch (error) {
       console.error("Error updating profile:", error);
-      onAuthError(error, "Link Account"); // Use a generic type or adjust as needed
+      onAuthError(error, "Link Account"); 
     } finally {
       setIsLoading(false);
     }
@@ -171,15 +190,13 @@ export function AccountSettingsDialog({
     setIsLoading(true);
     try {
       const result = await linkWithPopup(auth.currentUser, provider);
-      const credential = (provider.providerId === GoogleAuthProvider.PROVIDER_ID ? GoogleAuthProvider.credentialFromResult(result) : null);
-      // Update user profile in Firestore with new linked account info
       const newLinkedAccount = {
         providerId: result.providerId,
         email: result.user.email,
         displayName: result.user.displayName,
       };
       const updatedLinkedAccounts = [...(currentUser?.linkedAccounts || []), newLinkedAccount]
-        .filter((acc, index, self) => index === self.findIndex(a => a.providerId === acc.providerId)); // Ensure uniqueness
+        .filter((acc, index, self) => index === self.findIndex(a => a.providerId === acc.providerId)); 
 
       await updateUserProfileInFirestore(currentUser!.uid, { linkedAccounts: updatedLinkedAccounts });
       onAccountUpdate({ linkedAccounts: updatedLinkedAccounts });
@@ -200,10 +217,11 @@ export function AccountSettingsDialog({
           form.reset({ 
               displayName: currentUser?.name || '', 
               statusMessage: currentUser?.statusMessage || '',
-              avatarUrl: currentUser?.avatarUrl || '',
               shapesIncUsername: currentUser?.shapesIncUsername || '',
               shapesIncApiKey: currentUser?.shapesIncApiKey || '',
           });
+          setAvatarFile(null);
+          setAvatarPreview(currentUser?.avatarUrl || null);
           setShapesApiStatus(null);
         }
       }
@@ -218,6 +236,26 @@ export function AccountSettingsDialog({
         {currentUser ? (
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 max-h-[70vh] overflow-y-auto p-1 pr-3">
+              <div className="flex flex-col items-center space-y-2">
+                <Avatar className="h-24 w-24 ring-2 ring-primary ring-offset-2 ring-offset-background">
+                  <AvatarImage src={avatarPreview || undefined} alt={currentUser.name || "User avatar"} data-ai-hint="user profile large" />
+                  <AvatarFallback className="text-3xl">
+                    {currentUser.name ? currentUser.name.substring(0,1).toUpperCase() : 'U'}
+                  </AvatarFallback>
+                </Avatar>
+                <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+                  <UploadCloud className="mr-2 h-4 w-4" /> Change Avatar
+                </Button>
+                <Input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleAvatarChange} 
+                  className="hidden" 
+                  accept="image/*" 
+                />
+                 {avatarFile && <p className="text-xs text-muted-foreground truncate max-w-xs">Selected: {avatarFile.name}</p>}
+              </div>
+
               <FormField
                 control={form.control}
                 name="displayName"
@@ -226,19 +264,6 @@ export function AccountSettingsDialog({
                     <FormLabel>Display Name</FormLabel>
                     <FormControl>
                       <Input placeholder="Your display name" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="avatarUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Avatar URL (Optional)</FormLabel>
-                    <FormControl>
-                      <Input type="url" placeholder="https://example.com/avatar.png" {...field} value={field.value ?? ''}/>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -264,7 +289,7 @@ export function AccountSettingsDialog({
               <Separator />
               <h3 className="text-md font-medium pt-2">Shapes.inc Credentials</h3>
                <FormDescription className="text-xs -mt-2">
-                Link your Shapes.inc account to use with the default AI assistant.
+                Link your Shapes.inc account to use with the default AI assistant or your custom bots.
                </FormDescription>
               <FormField
                 control={form.control}
@@ -316,7 +341,6 @@ export function AccountSettingsDialog({
                     <LinkIcon className="mr-2 h-4 w-4" /> Link Google Account
                   </Button>
                 )}
-                {/* Add more providers here, e.g., GitHub */}
               </div>
 
 

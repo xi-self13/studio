@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -28,7 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
-import { Users2 as BotGroupsIcon, Loader2, Save, Trash2, PlusCircle, MinusCircle } from 'lucide-react';
+import { Users2 as BotGroupsIcon, Loader2, Save, Trash2, PlusCircle, MinusCircle, UploadCloud } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,12 +40,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Label } from '@/components/ui/label'; // Added import for Label
+import { Label } from '@/components/ui/label';
+import { uploadImageAndGetURL } from '@/lib/storageService';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 const formSchema = z.object({
   name: z.string().min(2, 'Group name must be at least 2 characters.').max(50, 'Group name must be 50 characters or less.'),
   description: z.string().max(500, "Description too long (max 500 chars).").optional(),
-  avatarUrl: z.string().url("Must be a valid URL for avatar image.").optional().or(z.literal('')),
+  // avatarUrl is handled by file upload
 });
 
 type ManageBotGroupFormValues = z.infer<typeof formSchema>;
@@ -74,7 +76,10 @@ export function ManageBotGroupDialog({
   onRemoveBotFromGroup,
 }: ManageBotGroupDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [currentBotIds, setCurrentBotIds] = useState<string[]>([]); // Tracks bot IDs for the current group session in dialog
+  const [currentBotIds, setCurrentBotIds] = useState<string[]>([]); 
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const form = useForm<ManageBotGroupFormValues>({
@@ -82,7 +87,6 @@ export function ManageBotGroupDialog({
     defaultValues: {
       name: '',
       description: '',
-      avatarUrl: '',
     },
   });
 
@@ -91,28 +95,46 @@ export function ManageBotGroupDialog({
       form.reset({
         name: groupConfig.name,
         description: groupConfig.description || '',
-        avatarUrl: groupConfig.avatarUrl || '',
       });
       setCurrentBotIds(groupConfig.botIds || []);
+      setAvatarPreview(groupConfig.avatarUrl || null);
+      setAvatarFile(null);
     } else {
-      form.reset({ name: '', description: '', avatarUrl: ''});
+      form.reset({ name: '', description: ''});
       setCurrentBotIds([]);
+      setAvatarPreview(null);
+      setAvatarFile(null);
     }
   }, [groupConfig, form, isOpen]);
+
+  const handleAvatarChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      setAvatarFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAvatarPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const onSubmitDetails: SubmitHandler<ManageBotGroupFormValues> = async (data) => {
     if (!groupConfig) return;
     setIsLoading(true);
+    let newAvatarUrl = groupConfig.avatarUrl;
     try {
-      // Call parent handler to update Firestore and parent state
+      if (avatarFile) {
+        const storagePath = `avatars/groups/${groupConfig.id}/${Date.now()}-${avatarFile.name}`;
+        newAvatarUrl = await uploadImageAndGetURL(avatarFile, storagePath);
+      }
       await onBotGroupUpdated({
         id: groupConfig.id,
         name: data.name,
         description: data.description || undefined,
-        avatarUrl: data.avatarUrl || undefined,
-        botIds: currentBotIds, // Send current bot IDs state from dialog for update
+        avatarUrl: newAvatarUrl || undefined,
+        botIds: currentBotIds, 
       });
-      // Toast is handled by parent
     } catch (error) {
       console.error("Error submitting group details update:", error);
       toast({ title: "Update Failed", description: (error as Error).message, variant: "destructive" });
@@ -133,9 +155,7 @@ export function ManageBotGroupDialog({
         await onAddBotToGroup(groupConfig.id, botId);
         setCurrentBotIds(prev => [...prev, botId]);
       }
-      // Parent's onAddBotToGroup/onRemoveBotFromGroup should handle toast
     } catch (error) {
-       // Parent should also handle toast for these errors
        console.error(`Error ${isCurrentlySelected ? 'removing' : 'adding'} bot:`, error);
     } finally {
         setIsLoading(false);
@@ -147,7 +167,6 @@ export function ManageBotGroupDialog({
     setIsLoading(true);
     try {
       await onBotGroupDeleted(groupConfig.id);
-      // Toast & dialog close handled by parent
     } catch (error) {
       console.error("Error deleting group:", error);
       toast({ title: "Deletion Failed", description: (error as Error).message, variant: "destructive" });
@@ -161,7 +180,7 @@ export function ManageBotGroupDialog({
   const availableBots = [
     ...userBots.map(b => ({ id: b.id, name: `${b.name} (My Bot)`, type: 'user' })),
     ...platformAndPublicAis
-        .filter(p => p.id !== groupConfig.ownerUserId) // Exclude self if platform AI is user
+        .filter(p => p.id !== groupConfig.ownerUserId) 
         .map(p => ({ id: p.id, name: `${p.name} (${p.isUserCreated ? 'Community' : 'Platform'})`, type: 'public' }))
   ].filter((bot, index, self) => 
     index === self.findIndex((b) => b.id === bot.id) 
@@ -182,6 +201,25 @@ export function ManageBotGroupDialog({
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmitDetails)} className="space-y-4 border-b pb-6 mb-6">
               <h3 className="text-lg font-medium text-foreground">Group Details</h3>
+              <div className="flex flex-col items-center space-y-2">
+                <Avatar className="h-24 w-24 ring-2 ring-primary ring-offset-2 ring-offset-background">
+                  <AvatarImage src={avatarPreview || undefined} alt={groupConfig.name || "Group avatar"} data-ai-hint="group avatar large"/>
+                  <AvatarFallback className="text-3xl bg-muted">
+                    <BotGroupsIcon size={48} className="text-primary"/>
+                  </AvatarFallback>
+                </Avatar>
+                <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={isLoading}>
+                  <UploadCloud className="mr-2 h-4 w-4" /> Change Group Avatar
+                </Button>
+                <Input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleAvatarChange} 
+                  className="hidden" 
+                  accept="image/*" 
+                />
+                {avatarFile && <p className="text-xs text-muted-foreground truncate max-w-xs">Selected: {avatarFile.name}</p>}
+              </div>
               <FormField
                 control={form.control}
                 name="name"
@@ -200,17 +238,6 @@ export function ManageBotGroupDialog({
                   <FormItem>
                     <FormLabel>Description (Optional)</FormLabel>
                     <FormControl><Textarea {...field} value={field.value ?? ''} rows={2} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="avatarUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Avatar URL (Optional)</FormLabel>
-                    <FormControl><Input type="url" {...field} value={field.value ?? ''} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -280,4 +307,3 @@ export function ManageBotGroupDialog({
     </Dialog>
   );
 }
-
