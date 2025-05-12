@@ -565,6 +565,7 @@ export default function ShapeTalkPage() {
     }
   }, [currentUser, directMessages, users, toast]);
 
+  const pathname = usePathname(); 
 
   useEffect(() => {
     if (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers || !currentUser) {
@@ -614,7 +615,7 @@ export default function ShapeTalkPage() {
         }
       }
       // Clean up query params after processing
-      const newPath = pathname; // Assuming you import usePathname from next/navigation
+      const newPath = pathname; 
       router.replace(newPath || '/');
       return; 
     }
@@ -689,9 +690,8 @@ export default function ShapeTalkPage() {
   }, [
     currentUser, channels, directMessages, activeChannelId, searchParams, router, botGroups, toast,
     isLoadingAuth, isLoadingUserBots, isLoadingBotGroups, isLoadingPlatformAis, isLoadingAllUsers,
-    allAppUsers, users, platformAndPublicAis, userBots, handleSelectUserForDm // Added dependencies
+    allAppUsers, users, platformAndPublicAis, userBots, handleSelectUserForDm, pathname 
   ]);
-  const pathname = usePathname(); // Ensure you import this if not already
 
 
   useEffect(() => {
@@ -1311,20 +1311,17 @@ export default function ShapeTalkPage() {
             batch.delete(docSnap.ref);
             needsBatchCommit = true;
           }
-        } else if (data && data.timestamp === null && data.userId !== currentUser?.uid) { // If timestamp is null (serverTimestamp pending) and not current user's own indicator
-          console.log(`Typing indicator ${docSnap.id} has a null timestamp, likely pending server write.`);
-           const indicator: TypingIndicator = { // Assume it's fresh if null and not ours
+        } else if (data && data.timestamp === null && data.userId !== currentUser?.uid) { 
+          const indicator: TypingIndicator = { 
             userId: data.userId,
             userName: data.userName,
             channelId: data.channelId,
             timestamp: now 
           };
-          if (indicator.userId !== currentUser.uid) { // Double check it's not the current user
+          if (indicator.userId !== currentUser.uid) { 
              indicators.push(indicator);
           }
-        } else if (data) {
-          // console.warn(`Typing indicator ${docSnap.id} has an invalid or missing timestamp field:`, data.timestamp);
-        }
+        } 
       });
 
       if (needsBatchCommit) {
@@ -1537,4 +1534,5 @@ export default function ShapeTalkPage() {
 }
 
     
+
 
