@@ -20,10 +20,9 @@ import { AccountSettingsDialog } from '@/components/settings/account-settings-di
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth, db } from '@/lib/firebase';
 import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, linkWithPopup } from 'firebase/auth';
-import { arrayUnion } from 'firebase/firestore';
+import { arrayUnion, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp, serverTimestamp, orderBy, Unsubscribe } from 'firebase/firestore';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp, Unsubscribe } from 'firebase/firestore';
 import { 
   getUserBotConfigsFromFirestore, 
   getPlatformShapesFromFirestore, 
@@ -40,6 +39,7 @@ import {
   getAllAppUsers,
   getOrCreateDmChannelBetweenUsers,
   createUserDocument,
+  TYPING_INDICATORS_COLLECTION, // Import for direct use
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -68,7 +68,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 const USERS_COLLECTION = 'users';
 const TYPING_INDICATOR_TIMEOUT = 5000; 
-const TYPING_INDICATORS_COLLECTION = 'typingIndicators';
+// const TYPING_INDICATORS_COLLECTION = 'typingIndicators'; // Already imported from firestoreService
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
 const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT';
@@ -1237,19 +1237,33 @@ export default function ShapeTalkPage() {
       let needsBatchCommit = false;
 
       snapshot.forEach((docSnap) => {
-        const data = docSnap.data() as Omit<TypingIndicator, 'timestamp'> & { timestamp: Timestamp }; 
-        const indicator: TypingIndicator = {
-          userId: data.userId,
-          userName: data.userName,
-          channelId: data.channelId,
-          timestamp: data.timestamp.toMillis() 
-        };
+        const data = docSnap.data(); 
+        
+        if (data && data.timestamp instanceof Timestamp) { // Check if timestamp is a Firestore Timestamp
+          const indicatorTimestamp = data.timestamp.toMillis();
+          const indicator: TypingIndicator = {
+            userId: data.userId,
+            userName: data.userName,
+            channelId: data.channelId,
+            timestamp: indicatorTimestamp
+          };
 
-        if (indicator.userId !== currentUser.uid && (now - indicator.timestamp) < TYPING_INDICATOR_TIMEOUT) {
-          indicators.push(indicator);
-        } else if ((now - indicator.timestamp) >= TYPING_INDICATOR_TIMEOUT) {
-          batch.delete(docSnap.ref);
-          needsBatchCommit = true;
+          if (indicator.userId !== currentUser.uid && (now - indicator.timestamp) < TYPING_INDICATOR_TIMEOUT) {
+            indicators.push(indicator);
+          } else if ((now - indicator.timestamp) >= TYPING_INDICATOR_TIMEOUT) {
+            batch.delete(docSnap.ref);
+            needsBatchCommit = true;
+          }
+        } else if (data && data.timestamp === null) {
+          // Timestamp is null, likely serverTimestamp() hasn't resolved yet.
+          // This is a transient state, usually resolves quickly.
+          console.log(`Typing indicator ${docSnap.id} has a null timestamp, likely pending server write.`);
+        } else if (data) {
+          // Timestamp is not a Timestamp object or is otherwise invalid
+          console.warn(`Typing indicator ${docSnap.id} has an invalid or missing timestamp field:`, data.timestamp);
+          // Optionally, delete malformed indicators if they persist
+          // batch.delete(docSnap.ref);
+          // needsBatchCommit = true;
         }
       });
 
@@ -1461,3 +1475,4 @@ export default function ShapeTalkPage() {
 }
 
     
+
