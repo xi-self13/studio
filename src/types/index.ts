@@ -10,6 +10,7 @@ export interface User {
   shapesIncApiKey?: string;
   shapesIncUsername?: string;
   lastSeen?: number | null; // Timestamp of last activity
+  entityType?: 'user'; // To help distinguish on discovery pages
 }
 
 export interface Shape {
@@ -64,6 +65,7 @@ export interface BotConfig {
   greetingMessage?: string; 
 }
 
+// Represents an AI entity that can be discovered. Could be a platform-defined AI or a user-created public bot.
 export interface PlatformShape {
   id: string; 
   name: string; 
@@ -72,9 +74,27 @@ export interface PlatformShape {
   dataAiHint?: string;
   shapeUsername: string; 
   tags?: string[];
-  isUserCreated?: boolean; 
-  ownerDisplayName?: string; 
+  isUserCreated: boolean; // True if this is a user's public bot, false if official platform AI
+  ownerDisplayName?: string; // Only relevant if isUserCreated is true
 }
+
+
+export interface DiscoverableEntity {
+  id: string; // User UID or Bot ID or Platform AI ID
+  name: string;
+  description?: string; // For bots/AIs, or user status/bio
+  avatarUrl?: string | null;
+  dataAiHint?: string;
+  entityType: 'user' | 'bot' | 'platformAI';
+  tags: string[]; 
+  // Bot/PlatformAI specific
+  shapeUsername?: string;
+  // User-created bot specific
+  ownerDisplayName?: string;
+  // User specific (optional)
+  statusMessage?: string;
+}
+
 
 export interface BotGroup {
   id: string;

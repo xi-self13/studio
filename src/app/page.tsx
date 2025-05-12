@@ -1,3 +1,5 @@
+
+
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -34,12 +36,11 @@ import {
   removeTypingIndicatorFromFirestore,
   saveMessageToFirestore, 
   subscribeToChannelMessages,
-  deleteMessageFromFirestore, // Added
+  deleteMessageFromFirestore,
   updateUserLastSeen,
   getAllAppUsers,
   getOrCreateDmChannelBetweenUsers,
   createUserDocument,
-  TYPING_INDICATORS_COLLECTION,
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -63,10 +64,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ChatView } from '@/components/chat/chat-view';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; 
+import { TYPING_INDICATORS_COLLECTION, USERS_COLLECTION } from '@/lib/constants';
 
-const USERS_COLLECTION = 'users';
 const TYPING_INDICATOR_TIMEOUT = 5000; 
 
 const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
@@ -181,7 +182,10 @@ export default function ShapeTalkPage() {
             fullBotConfig = await getBotConfigFromFirestore(targetBotId);
         } else if (foundPlatformBot) { // Platform official bot
             botShapeUsernameToUse = foundPlatformBot.shapeUsername;
-            botSystemPrompt = foundPlatformBot.description;
+            // For platform bots, their description (from PlatformShape) could act as a system prompt if needed.
+            // However, the chatWithShape flow currently only takes one explicit systemPrompt, usually from BotConfig.
+            // So, if `botSystemPrompt` is empty here, the default behavior of chatWithShape (or Shapes API) applies.
+            botSystemPrompt = foundPlatformBot.description; 
         }
       }
       
@@ -195,6 +199,8 @@ export default function ShapeTalkPage() {
         if (fullBotConfig.apiKey && fullBotConfig.apiKey !== '***') {
           botApiKeyToUse = fullBotConfig.apiKey;
         } else if (fullBotConfig.ownerUserId === forUserId && currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
+          // If it's the owner's bot and no specific API key is set for the bot,
+          // use the owner's Shapes.inc credentials IF they exist.
           botApiKeyToUse = currentUser.shapesIncApiKey;
           botShapeUsernameToUse = currentUser.shapesIncUsername; 
         } 
@@ -539,8 +545,29 @@ export default function ShapeTalkPage() {
     return () => unsubscribe();
   }, [handleAuthStateChangeLogic]); 
 
+  const handleSelectUserForDm = useCallback(async (targetUser: User) => {
+    if (!currentUser || !targetUser || currentUser.uid === targetUser.uid) return;
+    
+    try {
+      const dmChannel = await getOrCreateDmChannelBetweenUsers(currentUser.uid, targetUser.uid, targetUser.name || 'User');
+      if (!directMessages.find(dm => dm.id === dmChannel.id)) {
+        setDirectMessages(prevDms => [...prevDms, dmChannel]);
+      }
+      if (!users.find(u => u.uid === targetUser.uid)) {
+        setUsers(prev => [...prev, targetUser]);
+      }
+      setActiveChannelId(dmChannel.id);
+      if (currentUser) updateUserLastSeen(currentUser.uid);
+
+    } catch (error) {
+      console.error("Error creating/getting DM channel:", error);
+      toast({ title: "DM Error", description: "Could not start a chat with this user.", variant: "destructive" });
+    }
+  }, [currentUser, directMessages, users, toast]);
+
+
   useEffect(() => {
-    if (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers) {
+    if (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers || !currentUser) {
       return; 
     }
 
@@ -549,6 +576,49 @@ export default function ShapeTalkPage() {
     const manageGroupQuery = searchParams.get('manageGroup');
     const createGroupQuery = searchParams.get('createGroup');
     const settingsQuery = searchParams.get('settings');
+    const interactWithQuery = searchParams.get('interactWith');
+    const interactTypeQuery = searchParams.get('type');
+
+    if (interactWithQuery && interactTypeQuery) {
+      const targetId = interactWithQuery;
+      if (interactTypeQuery === 'user') {
+        const targetUser = allAppUsers.find(u => u.uid === targetId) || users.find(u => u.uid === targetId);
+        if (targetUser && !targetUser.isBot) {
+          handleSelectUserForDm(targetUser);
+        } else {
+          toast({ title: "Error", description: "User not found for DM.", variant: "destructive" });
+        }
+      } else if (interactTypeQuery === 'bot') {
+        const botInfo = platformAndPublicAis.find(p => p.id === targetId) || userBots.find(b => b.id === targetId);
+        if (botInfo) {
+          const dmChannelId = `dm_${targetId}_${currentUser.uid}`;
+          if (!directMessages.find(dm => dm.id === dmChannelId)) {
+            const newDmChannel: Channel = { 
+              id: dmChannelId, 
+              name: botInfo.name, 
+              type: 'dm', 
+              members: [currentUser.uid, targetId], 
+              isBotChannel: true, 
+              botId: targetId, 
+              icon: Bot 
+            };
+            setDirectMessages(prev => [...prev, newDmChannel]);
+             // Ensure bot user is in users list
+            if (!users.find(u => u.uid === targetId)) {
+              setUsers(prev => [...prev, { uid: targetId, name: botInfo.name, avatarUrl: botInfo.avatarUrl, isBot: true, dataAiHint: 'bot avatar' }]);
+            }
+          }
+          setActiveChannelId(dmChannelId);
+        } else {
+          toast({ title: "Error", description: "Bot not found for interaction.", variant: "destructive" });
+        }
+      }
+      // Clean up query params after processing
+      const newPath = pathname; // Assuming you import usePathname from next/navigation
+      router.replace(newPath || '/');
+      return; 
+    }
+
 
     if (createBotQuery === 'true') {
       setIsCreateBotDialogOpen(true);
@@ -618,8 +688,11 @@ export default function ShapeTalkPage() {
 
   }, [
     currentUser, channels, directMessages, activeChannelId, searchParams, router, botGroups, toast,
-    isLoadingAuth, isLoadingUserBots, isLoadingBotGroups, isLoadingPlatformAis, isLoadingAllUsers
+    isLoadingAuth, isLoadingUserBots, isLoadingBotGroups, isLoadingPlatformAis, isLoadingAllUsers,
+    allAppUsers, users, platformAndPublicAis, userBots, handleSelectUserForDm // Added dependencies
   ]);
+  const pathname = usePathname(); // Ensure you import this if not already
+
 
   useEffect(() => {
     if (messageListenerUnsubscribeRef.current) {
@@ -798,25 +871,7 @@ export default function ShapeTalkPage() {
     if (currentUser) updateUserLastSeen(currentUser.uid);
   };
 
-  const handleSelectUserForDm = async (targetUser: User) => {
-    if (!currentUser || !targetUser || currentUser.uid === targetUser.uid) return;
-    
-    try {
-      const dmChannel = await getOrCreateDmChannelBetweenUsers(currentUser.uid, targetUser.uid, targetUser.name || 'User');
-      if (!directMessages.find(dm => dm.id === dmChannel.id)) {
-        setDirectMessages(prevDms => [...prevDms, dmChannel]);
-      }
-      if (!users.find(u => u.uid === targetUser.uid)) {
-        setUsers(prev => [...prev, targetUser]);
-      }
-      setActiveChannelId(dmChannel.id);
-      if (currentUser) updateUserLastSeen(currentUser.uid);
 
-    } catch (error) {
-      console.error("Error creating/getting DM channel:", error);
-      toast({ title: "DM Error", description: "Could not start a chat with this user.", variant: "destructive" });
-    }
-  };
 
 
   const handleSendMessage = async (channelId: string, content: { type: 'text'; text: string } | { type: 'shape'; shapeId: string }) => {
@@ -1256,10 +1311,19 @@ export default function ShapeTalkPage() {
             batch.delete(docSnap.ref);
             needsBatchCommit = true;
           }
-        } else if (data && data.timestamp === null) {
+        } else if (data && data.timestamp === null && data.userId !== currentUser?.uid) { // If timestamp is null (serverTimestamp pending) and not current user's own indicator
           console.log(`Typing indicator ${docSnap.id} has a null timestamp, likely pending server write.`);
+           const indicator: TypingIndicator = { // Assume it's fresh if null and not ours
+            userId: data.userId,
+            userName: data.userName,
+            channelId: data.channelId,
+            timestamp: now 
+          };
+          if (indicator.userId !== currentUser.uid) { // Double check it's not the current user
+             indicators.push(indicator);
+          }
         } else if (data) {
-          console.warn(`Typing indicator ${docSnap.id} has an invalid or missing timestamp field:`, data.timestamp);
+          // console.warn(`Typing indicator ${docSnap.id} has an invalid or missing timestamp field:`, data.timestamp);
         }
       });
 
@@ -1333,7 +1397,7 @@ export default function ShapeTalkPage() {
             <Tooltip>
                 <TooltipTrigger asChild>
                     <Button 
-                        variant={"secondary"} 
+                        variant={pathname === '/' || !pathname ? "secondary" : "ghost"}
                         size="icon" 
                         className="h-12 w-12 rounded-full"
                         onClick={() => router.push('/')}
@@ -1347,7 +1411,7 @@ export default function ShapeTalkPage() {
              <Tooltip>
                 <TooltipTrigger asChild>
                     <Button
-                        variant={router.pathname === '/discover-shapes' ? "secondary" : "ghost"}
+                        variant={pathname === '/discover-shapes' ? "secondary" : "ghost"}
                         size="icon"
                         className="h-12 w-12 rounded-full text-sidebar-foreground hover:text-primary"
                         aria-label="Discover Shapes"
@@ -1473,3 +1537,4 @@ export default function ShapeTalkPage() {
 }
 
     
+
