@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -16,7 +17,7 @@ import { checkShapesApiHealth } from '@/lib/shapes-api-utils';
 import { CreateBotDialog } from '@/components/bot/create-bot-dialog';
 import { BotSettingsDialog } from '@/components/bot/bot-settings-dialog';
 import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog';
-import { ShapeTalkLogo } from '@/components/icons/logo';
+import ShapeTalkLogo from '@/components/icons/logo';
 import { auth, db } from '@/lib/firebase';
 import { GoogleAuthProvider, EmailAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, linkWithPopup } from 'firebase/auth';
 import { arrayUnion, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp, serverTimestamp, orderBy, type Unsubscribe } from 'firebase/firestore';

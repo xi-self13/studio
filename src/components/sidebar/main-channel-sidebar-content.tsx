@@ -15,7 +15,7 @@ import {
   SidebarMenuAction,
   SidebarMenuSkeleton,
 } from '@/components/ui/sidebar';
-import { ShapeTalkLogo } from '@/components/icons/logo';
+import ShapeTalkLogo from '@/components/icons/logo';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Settings, Bot, PlusCircle, Cpu, LogOut, UserCog, Users2 as BotGroupsIcon, Hash, Users as UsersIcon, Globe, ChevronDown, Copy, Share2, RefreshCw, EyeOff, MessageSquare } from 'lucide-react';
@@ -355,4 +355,5 @@ export function MainChannelSidebarContent({
   );
 }
 MainChannelSidebarContent.displayName = "AppSidebar";
+
 
