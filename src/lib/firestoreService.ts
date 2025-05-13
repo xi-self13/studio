@@ -19,7 +19,8 @@ import {
   Timestamp,
   orderBy,
   type Unsubscribe,
-  limit
+  limit,
+  onSnapshot 
 } from 'firebase/firestore'; 
 import type { BotConfig, PlatformShape, BotGroup, TypingIndicator, User, Message, Channel } from '@/types'; 
 import { USERS_COLLECTION, USER_BOTS_COLLECTION, PLATFORM_SHAPES_COLLECTION, BOT_GROUPS_COLLECTION, MESSAGES_COLLECTION, CHANNELS_COLLECTION, TYPING_INDICATORS_COLLECTION, DEFAULT_AI_BOT_USER_ID } from '@/lib/constants';
