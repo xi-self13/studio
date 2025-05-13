@@ -1,16 +1,19 @@
 export interface User {
   uid: string; // Firebase User ID or custom Bot ID
   name: string | null; 
+  username?: string | null; // Unique, settable once
   avatarUrl?: string | null; 
   email?: string | null; // Firebase email, optional for bots
   isBot?: boolean; 
   dataAiHint?: string; 
   statusMessage?: string; 
-  linkedAccounts?: Array<{ providerId: string; displayName?: string | null; email?: string | null }>; // displayName and email can be null
+  linkedAccounts?: Array<{ providerId: string; displayName?: string | null; email?: string | null; uid?: string; }>;
   shapesIncApiKey?: string;
   shapesIncUsername?: string;
   lastSeen?: number | null; // Timestamp of last activity
   entityType?: 'user'; // To help distinguish on discovery pages
+  isFounder?: boolean; // Special role for xi.self13
+  hasSetUsername?: boolean; // True if username has been set once
 }
 
 export interface Shape {
@@ -82,6 +85,7 @@ export interface PlatformShape {
 export interface DiscoverableEntity {
   id: string; // User UID or Bot ID or Platform AI ID
   name: string;
+  username?: string; // Added username
   description?: string; // For bots/AIs, or user status/bio
   avatarUrl?: string | null;
   dataAiHint?: string;
@@ -93,6 +97,7 @@ export interface DiscoverableEntity {
   ownerDisplayName?: string;
   // User specific (optional)
   statusMessage?: string;
+  isFounder?: boolean; // Added founder status
 }
 
 
@@ -112,3 +117,4 @@ export interface TypingIndicator {
   channelId: string;
   timestamp: number; 
 }
+

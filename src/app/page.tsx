@@ -1,5 +1,3 @@
-
-
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -20,8 +18,8 @@ import { BotSettingsDialog } from '@/components/bot/bot-settings-dialog';
 import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog';
 import { ShapeTalkLogo } from '@/components/icons/logo';
 import { auth, db } from '@/lib/firebase';
-import { GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, linkWithPopup } from 'firebase/auth';
-import { arrayUnion, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp, serverTimestamp, orderBy, Unsubscribe } from 'firebase/firestore';
+import { GoogleAuthProvider, EmailAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, linkWithPopup } from 'firebase/auth';
+import { arrayUnion, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp, serverTimestamp, orderBy, type Unsubscribe } from 'firebase/firestore';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { 
@@ -41,6 +39,7 @@ import {
   getAllAppUsers,
   getOrCreateDmChannelBetweenUsers,
   createUserDocument,
+  checkUsernameExists,
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -66,13 +65,10 @@ import {
 import { ChatView } from '@/components/chat/chat-view';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; 
-import { TYPING_INDICATORS_COLLECTION, USERS_COLLECTION } from '@/lib/constants';
+import { TYPING_INDICATORS_COLLECTION, USERS_COLLECTION, DEFAULT_AI_BOT_USER_ID, AI_LOUNGE_CHANNEL_ID, DEFAULT_BOT_CHANNEL_ID } from '@/lib/constants';
+import { ScrollArea } from '@/components/ui/scroll-area'; 
 
 const TYPING_INDICATOR_TIMEOUT = 5000; 
-
-const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
-const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT';
-const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global'; 
 
 const staticChannelsData: Channel[] = [
   { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'dm', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID, members: ['placeholderCurrentUser', DEFAULT_AI_BOT_USER_ID] }, 
@@ -118,6 +114,7 @@ export default function ShapeTalkPage() {
 
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname(); 
 
 
   const { toast } = useToast();
@@ -167,10 +164,12 @@ export default function ShapeTalkPage() {
         sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Still checking the default AI's connection. Please wait a moment.", "text");
         return;
       }
+      // Use current user's Shapes.inc credentials if they exist, otherwise default to ENV vars for default bot.
       if (currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
         botApiKeyToUse = currentUser.shapesIncApiKey;
         botShapeUsernameToUse = currentUser.shapesIncUsername;
       }
+      // If user doesn't have credentials, chatWithShape will use process.env variables as fallback
     } else {
       
       const foundUserBot = userBots.find(b => b.id === targetBotId);
@@ -182,27 +181,26 @@ export default function ShapeTalkPage() {
             fullBotConfig = await getBotConfigFromFirestore(targetBotId);
         } else if (foundPlatformBot) { // Platform official bot
             botShapeUsernameToUse = foundPlatformBot.shapeUsername;
-            // For platform bots, their description (from PlatformShape) could act as a system prompt if needed.
-            // However, the chatWithShape flow currently only takes one explicit systemPrompt, usually from BotConfig.
-            // So, if `botSystemPrompt` is empty here, the default behavior of chatWithShape (or Shapes API) applies.
             botSystemPrompt = foundPlatformBot.description; 
         }
       }
       
-      if (!fullBotConfig && !botShapeUsernameToUse) { // Still no config and not a platform official
+      if (!fullBotConfig && !botShapeUsernameToUse) { 
           fullBotConfig = await getBotConfigFromFirestore(targetBotId);
       }
 
       if (fullBotConfig) {
         botShapeUsernameToUse = fullBotConfig.shapeUsername;
         botSystemPrompt = fullBotConfig.systemPrompt;
+        // Use the bot's specific API key if it exists and is not just placeholder '***'
         if (fullBotConfig.apiKey && fullBotConfig.apiKey !== '***') {
           botApiKeyToUse = fullBotConfig.apiKey;
         } else if (fullBotConfig.ownerUserId === forUserId && currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
-          // If it's the owner's bot and no specific API key is set for the bot,
-          // use the owner's Shapes.inc credentials IF they exist.
+          // If it's the owner's bot and no specific API key for the bot, use owner's Shapes.inc credentials
           botApiKeyToUse = currentUser.shapesIncApiKey;
-          botShapeUsernameToUse = currentUser.shapesIncUsername; 
+          // Ensure we also use the owner's shape username if the bot's config doesn't override it explicitly.
+          // This line could be: botShapeUsernameToUse = currentUser.shapesIncUsername || fullBotConfig.shapeUsername;
+          // but usually, the bot's shapeUsername should take precedence if set.
         } 
       }
   
@@ -224,8 +222,8 @@ export default function ShapeTalkPage() {
         contextShapeId: actualContextShapeId,
         userId: forUserId,
         channelId: channelId,
-        botApiKey: botApiKeyToUse,
-        botShapeUsername: botShapeUsernameToUse,
+        botApiKey: botApiKeyToUse, // Pass explicitly, chatWithShape will fallback to ENV if undefined
+        botShapeUsername: botShapeUsernameToUse, // Pass explicitly, chatWithShape will fallback to ENV if undefined
         systemPrompt: botSystemPrompt,
       });
   
@@ -464,6 +462,7 @@ export default function ShapeTalkPage() {
         appUser = {
           uid: firebaseUser.uid,
           name: userData?.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous User',
+          username: userData?.username || null,
           avatarUrl: userData?.avatarUrl || firebaseUser.photoURL,
           email: firebaseUser.email,
           isBot: false,
@@ -472,6 +471,8 @@ export default function ShapeTalkPage() {
           shapesIncUsername: userData?.shapesIncUsername || undefined,
           linkedAccounts: userData?.linkedAccounts || [],
           lastSeen: userData?.lastSeen ? (userData.lastSeen as Timestamp).toMillis() : Date.now(),
+          isFounder: userData?.isFounder || false,
+          hasSetUsername: userData?.hasSetUsername || !!userData?.username, // if username exists, it has been set
         };
         await updateUserLastSeen(firebaseUser.uid); 
       } else {
@@ -480,13 +481,21 @@ export default function ShapeTalkPage() {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
           name: newName,
+          username: null, 
           avatarUrl: firebaseUser.photoURL,
           isBot: false,
           statusMessage: undefined,
           shapesIncApiKey: undefined,
           shapesIncUsername: undefined,
-          linkedAccounts: [],
+           linkedAccounts: firebaseUser.providerData.map(p => ({ 
+            providerId: p.providerId, 
+            uid: p.uid, 
+            displayName: p.displayName, 
+            email: p.email 
+          })),
           lastSeen: Date.now(),
+          isFounder: false,
+          hasSetUsername: false,
         };
         await createUserDocument(appUser);
       }
@@ -565,7 +574,6 @@ export default function ShapeTalkPage() {
     }
   }, [currentUser, directMessages, users, toast]);
 
-  const pathname = usePathname(); 
 
   useEffect(() => {
     if (isLoadingAuth || isLoadingUserBots || isLoadingBotGroups || isLoadingPlatformAis || isLoadingAllUsers || !currentUser) {
@@ -702,12 +710,13 @@ export default function ShapeTalkPage() {
 
     if (activeChannelId) {
       setMessages([]); 
-      messageListenerUnsubscribeRef.current = subscribeToChannelMessages(
+      const unsubscribe = subscribeToChannelMessages(
         activeChannelId,
         (fetchedMessages) => {
           setMessages(fetchedMessages);
         }
       );
+      messageListenerUnsubscribeRef.current = unsubscribe;
     } else {
       setMessages([]); 
     }
@@ -762,16 +771,29 @@ export default function ShapeTalkPage() {
           uid: user.uid,
           email: user.email,
           name: user.displayName || user.email?.split('@')[0] || 'Anonymous User',
+          username: null,
           avatarUrl: user.photoURL || null,
           isBot:false,
-          linkedAccounts: [{ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName }],
+          linkedAccounts: [{ 
+            providerId: GoogleAuthProvider.PROVIDER_ID, 
+            uid: user.uid, 
+            email: user.email, 
+            displayName: user.displayName 
+          }],
           lastSeen: Date.now(), 
+          isFounder: false,
+          hasSetUsername: false,
         });
       } else {
          await updateDoc(userDocRef, { 
             name: user.displayName || userSnap.data()?.name,
             avatarUrl: user.photoURL || userSnap.data()?.avatarUrl,
-            linkedAccounts: arrayUnion({ providerId: GoogleAuthProvider.PROVIDER_ID, email: user.email, displayName: user.displayName }),
+            linkedAccounts: arrayUnion({ 
+                providerId: GoogleAuthProvider.PROVIDER_ID, 
+                uid: user.uid,
+                email: user.email, 
+                displayName: user.displayName 
+            }),
             lastSeen: serverTimestamp(), 
         });
       }
@@ -818,10 +840,17 @@ export default function ShapeTalkPage() {
         uid: userCredential.user.uid,
         email: userCredential.user.email,
         name: newName,
+        username: null,
         avatarUrl: null,
         isBot:false,
-        linkedAccounts: [{ providerId: 'password', email: userCredential.user.email }],
+        linkedAccounts: [{ 
+            providerId: EmailAuthProvider.PROVIDER_ID, 
+            uid: userCredential.user.uid,
+            email: userCredential.user.email 
+        }],
         lastSeen: Date.now(), 
+        isFounder: false,
+        hasSetUsername: false,
       });
       toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
     } catch (error: any) {
@@ -1045,6 +1074,9 @@ export default function ShapeTalkPage() {
     setCurrentUser(newCurrentUser);
     setUsers(prevUsers => prevUsers.map(u => u.uid === newCurrentUser.uid ? newCurrentUser : u));
     if(updatedUserData.lastSeen) await updateUserLastSeen(currentUser.uid);
+    if ('username' in updatedUserData || 'isFounder' in updatedUserData || 'hasSetUsername' in updatedUserData) {
+        await loadAllAppUsers(); // Refresh all users if username or founder status changes
+    }
   };
 
   const handleAddChannel = () => { 
@@ -1296,6 +1328,7 @@ export default function ShapeTalkPage() {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data(); 
         
+        // Check if timestamp exists and is a Firestore Timestamp
         if (data && data.timestamp && typeof data.timestamp.toMillis === 'function') { 
           const indicatorTimestamp = data.timestamp.toMillis();
           const indicator: TypingIndicator = {
@@ -1312,16 +1345,34 @@ export default function ShapeTalkPage() {
             needsBatchCommit = true;
           }
         } else if (data && data.timestamp === null && data.userId !== currentUser?.uid) { 
+          // Handle cases where timestamp might be null (e.g. not yet set by serverTimestamp)
+          // This could happen if a document is created client-side then serverTimestamp resolves later.
+          // For simplicity, treat as currently typing if timestamp is null and not own user.
           const indicator: TypingIndicator = { 
             userId: data.userId,
             userName: data.userName,
             channelId: data.channelId,
-            timestamp: now 
+            timestamp: now // Use current time as a fallback to avoid indefinite display
           };
-          if (indicator.userId !== currentUser.uid) { 
+          if (indicator.userId !== currentUser.uid) { // Double check it's not the current user
              indicators.push(indicator);
           }
-        } 
+        } else if (data && data.timestamp && typeof data.timestamp === 'number' && data.userId !== currentUser.uid) {
+          // Handle cases where timestamp might already be a number (e.g. from client-side set on initial typing)
+           const indicatorTimestamp = data.timestamp;
+            const indicator: TypingIndicator = {
+            userId: data.userId,
+            userName: data.userName,
+            channelId: data.channelId,
+            timestamp: indicatorTimestamp
+          };
+           if (indicator.userId !== currentUser.uid && (now - indicator.timestamp) < TYPING_INDICATOR_TIMEOUT) {
+            indicators.push(indicator);
+          } else if ((now - indicator.timestamp) >= TYPING_INDICATOR_TIMEOUT) {
+            batch.delete(docSnap.ref);
+            needsBatchCommit = true;
+          }
+        }
       });
 
       if (needsBatchCommit) {
@@ -1532,7 +1583,4 @@ export default function ShapeTalkPage() {
     </div>
   );
 }
-
-    
-
 

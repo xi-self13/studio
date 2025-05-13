@@ -7,6 +7,6 @@ schema:
     postgresql:
       database: "fdcdb"
       cloudSql:
-        instanceId: "studio-fdc"
+        instanceId: "shaply-csql"
       # schemaValidation: "COMPATIBLE"
 connectorDirs: ["./connector"]

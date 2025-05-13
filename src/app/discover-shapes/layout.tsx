@@ -1,4 +1,3 @@
-
 "use client"; 
 
 import { MainChannelSidebarContent } from '@/components/sidebar/main-channel-sidebar-content';
@@ -7,20 +6,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { auth, db } from '@/lib/firebase';
 import type { User as FirebaseUser } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, type Timestamp } from 'firebase/firestore';
 import type { User, Channel, BotGroup, BotConfig, PlatformShape } from '@/types';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'; 
 import Link from 'next/link';
-import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore, getAllAppUsers } from '@/lib/firestoreService'; // Added getAllAppUsers
+import { getUserBotConfigsFromFirestore, getOwnedBotGroupsFromFirestore, getAllAppUsers } from '@/lib/firestoreService'; 
 import { Bot, Cpu, Loader2, Compass, MessageSquare } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { ShapeTalkLogo } from '@/components/icons/logo';
+import { DEFAULT_BOT_CHANNEL_ID, DEFAULT_AI_BOT_USER_ID, AI_LOUNGE_CHANNEL_ID } from '@/lib/constants';
 
-
-const DEFAULT_BOT_CHANNEL_ID = 'shapes-ai-chat'; 
-const DEFAULT_AI_BOT_USER_ID = 'AI_BOT_DEFAULT'; 
-const AI_LOUNGE_CHANNEL_ID = 'ai-lounge-global';
 
 const staticGlobalChannelsForDiscover: Channel[] = [
   { id: DEFAULT_BOT_CHANNEL_ID, name: 'shapes-ai-chat', type: 'dm', icon: Bot, isBotChannel: true, botId: DEFAULT_AI_BOT_USER_ID, members: ['currentUserDynamic', DEFAULT_AI_BOT_USER_ID] },
@@ -34,20 +30,20 @@ export default function DiscoverShapesLayout({
   children: React.ReactNode;
 }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [allAppUsers, setAllAppUsers] = useState<User[]>([]); // Added
+  const [allAppUsers, setAllAppUsers] = useState<User[]>([]); 
   const [userDirectMessages, setUserDirectMessages] = useState<Channel[]>([]);
   const [userBotGroups, setUserBotGroups] = useState<BotGroup[]>([]);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingDMs, setIsLoadingDMs] = useState(false);
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
-  const [isLoadingAllUsers, setIsLoadingAllUsers] = useState(false); // Added
+  const [isLoadingAllUsers, setIsLoadingAllUsers] = useState(false); 
   const router = useRouter();
   const pathname = usePathname(); 
   const searchParams = useSearchParams(); 
   const [activeChannelIdForDiscover, setActiveChannelIdForDiscover] = useState<string | null>(null);
 
 
-  const loadAllAppUsersForDiscover = useCallback(async () => { // Added
+  const loadAllAppUsersForDiscover = useCallback(async () => { 
     setIsLoadingAllUsers(true);
     try {
       const fetchedUsers = await getAllAppUsers();
@@ -118,6 +114,7 @@ export default function DiscoverShapesLayout({
             appUser = {
                 uid: firebaseUser.uid,
                 name: userData?.name || firebaseUser.displayName || firebaseUser.email || 'User',
+                username: userData?.username || null,
                 avatarUrl: userData?.avatarUrl || firebaseUser.photoURL,
                 email: firebaseUser.email,
                 statusMessage: userData?.statusMessage,
@@ -126,6 +123,8 @@ export default function DiscoverShapesLayout({
                 shapesIncUsername: userData?.shapesIncUsername,
                 linkedAccounts: userData?.linkedAccounts || [],
                 lastSeen: userData?.lastSeen ? (userData.lastSeen as Timestamp).toMillis() : null,
+                isFounder: userData?.isFounder || false,
+                hasSetUsername: userData?.hasSetUsername || false,
             };
         } else { 
             appUser = {
@@ -140,13 +139,13 @@ export default function DiscoverShapesLayout({
         setCurrentUser(appUser);
         await loadUserDMs(firebaseUser.uid);
         await loadUserBotGroups(firebaseUser.uid); 
-        await loadAllAppUsersForDiscover(); // Added
+        await loadAllAppUsersForDiscover(); 
       } else {
         setCurrentUser(null);
         const defaultBotDm = staticGlobalChannelsForDiscover.find(c => c.type === 'dm' && c.botId === DEFAULT_AI_BOT_USER_ID);
         setUserDirectMessages(defaultBotDm ? [{...defaultBotDm, members:['placeholderGuest', defaultBotDm.botId!]}] : []);
         setUserBotGroups([]); 
-        setAllAppUsers([]); // Added
+        setAllAppUsers([]); 
       }
       setIsLoadingAuth(false);
     });
@@ -246,7 +245,7 @@ export default function DiscoverShapesLayout({
                 <MainChannelSidebarContent
                     channels={globalChannelsForSidebar} 
                     directMessages={userDirectMessages}
-                    allAppUsers={allAppUsers} // Added
+                    allAppUsers={allAppUsers} 
                     botGroups={userBotGroups || []}
                     userBots={[] as BotConfig[]} 
                     platformAis={[] as PlatformShape[]} 
@@ -256,8 +255,8 @@ export default function DiscoverShapesLayout({
                     onSelectChannel={(channelId) => {
                         router.push(`/?channel=${channelId}`); 
                     }}
-                    onSelectUserForDm={(user) => { // Added
-                        router.push(`/?dm_user=${user.uid}`);
+                    onSelectUserForDm={(user) => { 
+                        router.push(`/?interactWith=${user.uid}&type=user`);
                     }}
                     onOpenAccountSettings={() => router.push('/?settings=account')} 
                     onAddChannel={() => {}} 
@@ -269,7 +268,7 @@ export default function DiscoverShapesLayout({
                       router.push('/'); 
                     }}
                     isLoadingUserBots={isLoadingDMs || isLoadingBotGroups} 
-                    isLoadingAllUsers={isLoadingAllUsers} // Added
+                    isLoadingAllUsers={isLoadingAllUsers} 
                 />
             </Sidebar>
         ) : (

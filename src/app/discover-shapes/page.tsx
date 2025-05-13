@@ -5,7 +5,7 @@ import type { PlatformShape, BotConfig, User, DiscoverableEntity } from '@/types
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { Bot, Users, MessageSquare } from 'lucide-react';
+import { Bot, Users, MessageSquare, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { db, auth } from '@/lib/firebase';
@@ -66,9 +66,7 @@ async function DiscoverShapesPage() {
 
   // Add Public User Bots
   for (const bot of publicUserBots) {
-    // Don't show a user's own bot if they are the one viewing
-    // (This behavior can be adjusted if needed)
-    // if (currentUser && bot.ownerUserId === currentUser.uid) continue;
+    // if (currentUser && bot.ownerUserId === currentUser.uid) continue; // Optionally hide own bots
     
     discoverableEntities.push({
       id: bot.id,
@@ -85,22 +83,23 @@ async function DiscoverShapesPage() {
 
   // Add Users (excluding the current user)
   allUsers.forEach(user => {
-    if (currentUser && user.uid === currentUser.uid) return; // Don't list the current user themselves
-    if (user.isBot) return; // Already handled by bot sections
+    if (currentUser && user.uid === currentUser.uid) return; 
+    if (user.isBot) return; 
 
     discoverableEntities.push({
       id: user.uid,
       name: user.name || 'User',
+      username: user.username || undefined,
       description: user.statusMessage || 'A member of the community.',
       avatarUrl: user.avatarUrl,
       dataAiHint: user.dataAiHint || 'profile user',
       entityType: 'user',
-      tags: ['User'],
+      tags: ['User', ...(user.isFounder ? ['Founder'] : [])],
       statusMessage: user.statusMessage,
+      isFounder: user.isFounder,
     });
   });
 
-  // Simple sort: users, then bots, then platform AIs, then by name
   discoverableEntities.sort((a, b) => {
     const typeOrder = { user: 0, bot: 1, platformAI: 2 };
     if (typeOrder[a.entityType] !== typeOrder[b.entityType]) {
@@ -143,7 +142,17 @@ async function DiscoverShapesPage() {
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1">
-                  <CardTitle className="text-xl mb-1">{entity.name}</CardTitle>
+                  <CardTitle className="text-xl mb-1 flex items-center">
+                    {entity.name}
+                    {entity.entityType === 'user' && entity.isFounder && (
+                       <ShieldCheck className="ml-2 h-5 w-5 text-primary" title="Founder" />
+                    )}
+                  </CardTitle>
+                  {entity.entityType === 'user' && entity.username && (
+                    <CardDescription className="text-sm text-muted-foreground -mt-1 mb-0.5">
+                       @{entity.username}
+                    </CardDescription>
+                  )}
                   {entity.entityType !== 'user' && entity.shapeUsername && (
                      <CardDescription className="text-sm text-muted-foreground">
                         Model: <code className="text-xs bg-muted px-1 py-0.5 rounded">shapesinc/{entity.shapeUsername}</code>
@@ -161,7 +170,7 @@ async function DiscoverShapesPage() {
                 {entity.tags && entity.tags.length > 0 && (
                   <div className="mt-3">
                     {entity.tags.map((tag) => (
-                      <Badge key={tag} variant={entity.entityType === 'user' ? "secondary" : "outline"} className="mr-1 mb-1 text-xs">
+                      <Badge key={tag} variant={entity.entityType === 'user' ? (tag === 'Founder' ? "default" : "secondary") : "outline"} className="mr-1 mb-1 text-xs">
                         {tag}
                       </Badge>
                     ))}
@@ -190,10 +199,4 @@ async function DiscoverShapesPage() {
        <div className="mt-12 text-center">
         <Link href="/" passHref>
           <Button variant="link">Back to Chat</Button>
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-export default DiscoverShapesPage;
+        
