@@ -1,6 +1,5 @@
-// src/lib/firestoreService.ts
-// Removed 'use server'; directive from here
 
+// src/lib/firestoreService.ts
 import { db } from './firebase';
 import {
   collection,
@@ -19,12 +18,11 @@ import {
   writeBatch,
   Timestamp,
   orderBy,
-  onSnapshot,
   type Unsubscribe,
   limit
 } from 'firebase/firestore'; 
 import type { BotConfig, PlatformShape, BotGroup, TypingIndicator, User, Message, Channel } from '@/types'; 
-import { USERS_COLLECTION, USER_BOTS_COLLECTION, PLATFORM_SHAPES_COLLECTION, BOT_GROUPS_COLLECTION, MESSAGES_COLLECTION, CHANNELS_COLLECTION, TYPING_INDICATORS_COLLECTION } from '@/lib/constants';
+import { USERS_COLLECTION, USER_BOTS_COLLECTION, PLATFORM_SHAPES_COLLECTION, BOT_GROUPS_COLLECTION, MESSAGES_COLLECTION, CHANNELS_COLLECTION, TYPING_INDICATORS_COLLECTION, DEFAULT_AI_BOT_USER_ID } from '@/lib/constants';
 
 
 // --- User Profile Functions ---
@@ -32,7 +30,6 @@ export async function updateUserProfileInFirestore(userId: string, profileData: 
   try {
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     const dataToUpdate: any = {};
-    // Only include fields that are explicitly provided in profileData
     if ('name' in profileData) dataToUpdate.name = profileData.name;
     if ('username' in profileData) dataToUpdate.username = profileData.username === '' ? null : profileData.username;
     if ('avatarUrl' in profileData) dataToUpdate.avatarUrl = profileData.avatarUrl === '' ? null : profileData.avatarUrl;
@@ -43,6 +40,7 @@ export async function updateUserProfileInFirestore(userId: string, profileData: 
     if ('lastSeen' in profileData) dataToUpdate.lastSeen = profileData.lastSeen ? Timestamp.fromMillis(profileData.lastSeen) : serverTimestamp();
     if ('isFounder' in profileData) dataToUpdate.isFounder = profileData.isFounder;
     if ('hasSetUsername' in profileData) dataToUpdate.hasSetUsername = profileData.hasSetUsername;
+    if ('email' in profileData) dataToUpdate.email = profileData.email;
 
 
     await updateDoc(userDocRef, dataToUpdate);
@@ -53,12 +51,12 @@ export async function updateUserProfileInFirestore(userId: string, profileData: 
   }
 }
 
-export async function createUserDocument(userData: User): Promise<void> {
+export async function createUserDocument(userData: User, authProviderEmail?: string | null): Promise<void> {
     const userDocRef = doc(db, USERS_COLLECTION, userData.uid);
     try {
         await setDoc(userDocRef, {
             uid: userData.uid,
-            email: userData.email || null,
+            email: authProviderEmail || userData.email || null, // Prioritize authProviderEmail (dummy or real)
             name: userData.name || 'Anonymous User',
             username: userData.username || null,
             avatarUrl: userData.avatarUrl || null,
@@ -67,9 +65,9 @@ export async function createUserDocument(userData: User): Promise<void> {
             shapesIncApiKey: userData.shapesIncApiKey || null,
             shapesIncUsername: userData.shapesIncUsername || null,
             linkedAccounts: userData.linkedAccounts || [],
-            lastSeen: serverTimestamp(), // Set initial lastSeen
+            lastSeen: serverTimestamp(),
             isFounder: userData.isFounder || false,
-            hasSetUsername: userData.hasSetUsername || false,
+            hasSetUsername: userData.hasSetUsername || !!userData.username,
         });
     } catch (error) {
         console.error("Error creating user document:", error);
@@ -77,20 +75,51 @@ export async function createUserDocument(userData: User): Promise<void> {
     }
 }
 
+export async function getUserProfileByUsername(username: string): Promise<User | null> {
+  try {
+    const usersCollectionRef = collection(db, USERS_COLLECTION);
+    const q = query(usersCollectionRef, where('username', '==', username), limit(1));
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const docSnap = querySnapshot.docs[0];
+      const data = docSnap.data();
+      return {
+        uid: docSnap.id,
+        name: data.name,
+        username: data.username,
+        avatarUrl: data.avatarUrl,
+        email: data.email, // This will be the dummy email used for Firebase Auth
+        isBot: data.isBot || false,
+        statusMessage: data.statusMessage,
+        shapesIncApiKey: data.shapesIncApiKey,
+        shapesIncUsername: data.shapesIncUsername,
+        linkedAccounts: data.linkedAccounts || [],
+        lastSeen: data.lastSeen ? (data.lastSeen as Timestamp).toMillis() : null,
+        isFounder: data.isFounder || false,
+        hasSetUsername: data.hasSetUsername || false,
+      } as User;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching user by username from Firestore:', error);
+    return null;
+  }
+}
+
+
 export async function updateUserLastSeen(userId: string): Promise<void> {
   try {
     const userDocRef = doc(db, USERS_COLLECTION, userId);
     await updateDoc(userDocRef, { lastSeen: serverTimestamp() });
   } catch (error) {
     console.error(`Error updating lastSeen for user ${userId}:`, error);
-    // Non-critical, so don't throw
   }
 }
 
 export async function getAllAppUsers(): Promise<User[]> {
   try {
     const usersCollectionRef = collection(db, USERS_COLLECTION);
-    const q = query(usersCollectionRef, where('isBot', '!=', true)); // Exclude bots
+    const q = query(usersCollectionRef, where('isBot', '!=', true)); 
     const querySnapshot = await getDocs(q);
     
     const appUsers: User[] = [];
@@ -128,8 +157,6 @@ export async function checkUsernameExists(username: string): Promise<boolean> {
     return !querySnapshot.empty;
   } catch (error) {
     console.error('Error checking if username exists in Firestore:', error);
-    // In case of error, assume it might exist to prevent accidental duplicates,
-    // or handle more gracefully depending on requirements.
     return true; 
   }
 }
@@ -327,7 +354,6 @@ export async function seedPlatformShapes() {
   let seededCount = 0;
   for (const shape of shapesToSeed) {
     try {
-      // Check if shape already exists by ID
       const existingShapeDoc = await getDoc(doc(db, PLATFORM_SHAPES_COLLECTION, shape.id!));
       if (!existingShapeDoc.exists()) {
         await addPlatformShapeToFirestore(shape);
@@ -511,14 +537,14 @@ export async function getOrCreateDmChannelBetweenUsers(user1Uid: string, user2Ui
   } else {
     const newChannelData: Channel = {
       id: channelId,
-      name: user2Name, // Name of the other user in the DM
+      name: user2Name, 
       type: 'dm',
       members: [user1Uid, user2Uid],
-      isUserDm: true, // Mark as a user-to-user DM
+      isUserDm: true, 
     };
     await setDoc(channelDocRef, {
         ...newChannelData,
-        createdAt: serverTimestamp(), // Add a creation timestamp
+        createdAt: serverTimestamp(), 
     });
     return newChannelData;
   }
@@ -549,13 +575,6 @@ export async function deleteMessageFromFirestore(messageId: string): Promise<voi
   }
 }
 
-
-// This function sets up a Firestore listener and is intended for client-side use.
-// It should not be marked with 'use server' globally if the file contains it.
-// If this file were `'use server'` at the top, this function would cause issues
-// if imported and used directly by a client component for its listener capabilities.
-// Removing the global 'use server' directive makes this function behave as a normal
-// client-side utility when imported into a client component.
 export function subscribeToChannelMessages(
   channelId: string,
   onMessagesUpdate: (messages: Message[]) => void

@@ -1,7 +1,8 @@
 
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import * as React from 'react'; // Added React import
+import { useState, useEffect, useCallback } from 'react';
 import type { Channel, Message, User, BotConfig, PlatformShape, BotGroup, TypingIndicator } from '@/types';
 import { MainChannelSidebarContent } from '@/components/sidebar/main-channel-sidebar-content';
 import { Sidebar, SidebarProvider, SidebarInset, MobileSidebarTrigger } from '@/components/ui/sidebar';
@@ -19,7 +20,7 @@ import { BotSettingsDialog } from '@/components/bot/bot-settings-dialog';
 import { AccountSettingsDialog } from '@/components/settings/account-settings-dialog';
 import ShapeTalkLogo from '@/components/icons/logo';
 import { auth, db } from '@/lib/firebase';
-import { GoogleAuthProvider, EmailAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, linkWithPopup } from 'firebase/auth';
+import { GoogleAuthProvider, EmailAuthProvider, signInWithPopup, signOut, onAuthStateChanged, type User as FirebaseUser, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, linkWithPopup, linkWithCredential } from 'firebase/auth';
 import { arrayUnion, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query, where, writeBatch, Timestamp, serverTimestamp, orderBy, type Unsubscribe } from 'firebase/firestore';
 import { Separator } from '@/components/ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -41,6 +42,7 @@ import {
   getOrCreateDmChannelBetweenUsers,
   createUserDocument,
   checkUsernameExists,
+  getUserProfileByUsername,
 } from '@/lib/firestoreService';
 import { CreateBotGroupDialog } from '@/components/bot-groups/create-bot-group-dialog';
 import { ManageBotGroupDialog } from '@/components/bot-groups/manage-bot-group-dialog';
@@ -65,9 +67,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ChatView } from '@/components/chat/chat-view';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; 
 import { TYPING_INDICATORS_COLLECTION, USERS_COLLECTION, DEFAULT_AI_BOT_USER_ID, AI_LOUNGE_CHANNEL_ID, DEFAULT_BOT_CHANNEL_ID } from '@/lib/constants';
 import { ScrollArea } from '@/components/ui/scroll-area'; 
+import { StartupScreen } from '@/components/startup/startup-screen';
 
 const TYPING_INDICATOR_TIMEOUT = 5000; 
 
@@ -77,6 +79,7 @@ const staticChannelsData: Channel[] = [
 ];
 
 export default function ShapeTalkPage() {
+  const [showStartupScreen, setShowStartupScreen] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [directMessages, setDirectMessages] = useState<Channel[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
@@ -98,9 +101,8 @@ export default function ShapeTalkPage() {
   const [isLoadingBotGroups, setIsLoadingBotGroups] = useState(false);
   const [isLoadingAllUsers, setIsLoadingAllUsers] = useState(false);
 
-
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [botGroups, setBotGroups] = useState<BotGroup[]>([]);
@@ -110,8 +112,8 @@ export default function ShapeTalkPage() {
   const [isUpdatingGroup, setIsUpdatingGroup] = useState(false);
 
   const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]);
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const messageListenerUnsubscribeRef = useRef<Unsubscribe | null>(null); 
+  const typingTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const messageListenerUnsubscribeRef = React.useRef<Unsubscribe | null>(null); 
 
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -147,7 +149,6 @@ export default function ShapeTalkPage() {
       } catch (delError) {
         console.error("Error deleting message to replace:", delError);
         toast({ title: "Regeneration Error", description: "Could not remove the old message.", variant: "destructive"});
-        // Optionally, decide if you want to proceed or return
       }
     }
   
@@ -165,12 +166,10 @@ export default function ShapeTalkPage() {
         sendBotMessageUtil(channelId, DEFAULT_AI_BOT_USER_ID, "Still checking the default AI's connection. Please wait a moment.", "text");
         return;
       }
-      // Use current user's Shapes.inc credentials if they exist, otherwise default to ENV vars for default bot.
       if (currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
         botApiKeyToUse = currentUser.shapesIncApiKey;
         botShapeUsernameToUse = currentUser.shapesIncUsername;
       }
-      // If user doesn't have credentials, chatWithShape will use process.env variables as fallback
     } else {
       
       const foundUserBot = userBots.find(b => b.id === targetBotId);
@@ -178,9 +177,9 @@ export default function ShapeTalkPage() {
   
       if (!fullBotConfig) {
         const foundPlatformBot = platformAndPublicAis.find(p => p.id === targetBotId);
-        if (foundPlatformBot?.isUserCreated) { // User-created public bot
+        if (foundPlatformBot?.isUserCreated) { 
             fullBotConfig = await getBotConfigFromFirestore(targetBotId);
-        } else if (foundPlatformBot) { // Platform official bot
+        } else if (foundPlatformBot) { 
             botShapeUsernameToUse = foundPlatformBot.shapeUsername;
             botSystemPrompt = foundPlatformBot.description; 
         }
@@ -193,15 +192,10 @@ export default function ShapeTalkPage() {
       if (fullBotConfig) {
         botShapeUsernameToUse = fullBotConfig.shapeUsername;
         botSystemPrompt = fullBotConfig.systemPrompt;
-        // Use the bot's specific API key if it exists and is not just placeholder '***'
         if (fullBotConfig.apiKey && fullBotConfig.apiKey !== '***') {
           botApiKeyToUse = fullBotConfig.apiKey;
         } else if (fullBotConfig.ownerUserId === forUserId && currentUser?.shapesIncApiKey && currentUser?.shapesIncUsername) {
-          // If it's the owner's bot and no specific API key for the bot, use owner's Shapes.inc credentials
           botApiKeyToUse = currentUser.shapesIncApiKey;
-          // Ensure we also use the owner's shape username if the bot's config doesn't override it explicitly.
-          // This line could be: botShapeUsernameToUse = currentUser.shapesIncUsername || fullBotConfig.shapeUsername;
-          // but usually, the bot's shapeUsername should take precedence if set.
         } 
       }
   
@@ -217,15 +211,42 @@ export default function ShapeTalkPage() {
         sendBotMessageUtil(channelId, targetBotId, "Missing core context to interact with AI.", "text");
         return;
       }
+
+      const selectedShape = PREDEFINED_SHAPES.find(s => s.id === actualContextShapeId);
+      const shapeNameForContext = selectedShape?.name || 'the selected concept';
+      
+      let augmentedPromptText = userPrompt;
+      const lowerCasePrompt = userPrompt.toLowerCase();
+      const searchKeywords = ["search for", "find out about", "what is", "tell me about", "explain", "define", "research", "look up"];
+      const thinkingKeywords = ["think about", "consider", "analyze", "reflect on"];
+      let prePrompt = "";
+
+      if (searchKeywords.some(keyword => lowerCasePrompt.includes(keyword))) {
+        prePrompt = `The user is looking for information or an explanation. `;
+      } else if (thinkingKeywords.some(keyword => lowerCasePrompt.includes(keyword))) {
+        prePrompt = `The user is asking for a thoughtful analysis or consideration. `;
+      }
+      
+      let finalUserMessageContent: string;
+      if (botSystemPrompt) {
+        finalUserMessageContent = `${botSystemPrompt}\n\n${prePrompt}Regarding "${shapeNameForContext}", user query: ${userPrompt}`;
+      } else {
+        finalUserMessageContent = `${prePrompt}User query regarding "${shapeNameForContext}": ${userPrompt}`;
+      }
+      if (userPrompt.trim() === "" && prePrompt.trim() !== "") {
+          finalUserMessageContent = prePrompt + `Please provide a general response regarding "${shapeNameForContext}".`;
+      } else if (userPrompt.trim() === "" && prePrompt.trim() === "") {
+        finalUserMessageContent = `User query regarding "${shapeNameForContext}": Please provide a general response.`;
+      }
   
       const aiResponse = await chatWithShape({
-        promptText: userPrompt,
+        promptText: finalUserMessageContent.trim(),
         contextShapeId: actualContextShapeId,
         userId: forUserId,
         channelId: channelId,
-        botApiKey: botApiKeyToUse, // Pass explicitly, chatWithShape will fallback to ENV if undefined
-        botShapeUsername: botShapeUsernameToUse, // Pass explicitly, chatWithShape will fallback to ENV if undefined
-        systemPrompt: botSystemPrompt,
+        botApiKey: botApiKeyToUse,
+        botShapeUsername: botShapeUsernameToUse,
+        // System prompt is now part of finalUserMessageContent
       });
   
       await sendBotMessageUtil(channelId, targetBotId, aiResponse.responseText, "ai_response", userPrompt, actualContextShapeId);
@@ -465,7 +486,7 @@ export default function ShapeTalkPage() {
           name: userData?.name || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous User',
           username: userData?.username || null,
           avatarUrl: userData?.avatarUrl || firebaseUser.photoURL,
-          email: firebaseUser.email,
+          email: userData?.email || firebaseUser.email, // Prefer Firestore email (dummy or real)
           isBot: false,
           statusMessage: userData?.statusMessage || undefined,
           shapesIncApiKey: userData?.shapesIncApiKey || undefined,
@@ -473,16 +494,22 @@ export default function ShapeTalkPage() {
           linkedAccounts: userData?.linkedAccounts || [],
           lastSeen: userData?.lastSeen ? (userData.lastSeen as Timestamp).toMillis() : Date.now(),
           isFounder: userData?.isFounder || false,
-          hasSetUsername: userData?.hasSetUsername || !!userData?.username, // if username exists, it has been set
+          hasSetUsername: userData?.hasSetUsername || !!userData?.username,
         };
         await updateUserLastSeen(firebaseUser.uid); 
       } else {
+        // This path should ideally not be hit if signup creates the doc.
+        // If hit, it means a Firebase user exists without a corresponding Firestore doc.
+        // We might be creating a user here based on Firebase Auth info only,
+        // which might lack the custom username if it was a username-only signup that failed mid-way.
+        // Or, this is a user from a previous system/direct Firebase console creation.
+        console.warn(`Firestore document for user ${firebaseUser.uid} not found. Creating one.`);
         const newName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Anonymous User';
         appUser = {
           uid: firebaseUser.uid,
-          email: firebaseUser.email,
+          email: firebaseUser.email, // This would be the Firebase Auth email
           name: newName,
-          username: null, 
+          username: null, // Username would need to be set separately
           avatarUrl: firebaseUser.photoURL,
           isBot: false,
           statusMessage: undefined,
@@ -498,7 +525,8 @@ export default function ShapeTalkPage() {
           isFounder: false,
           hasSetUsername: false,
         };
-        await createUserDocument(appUser);
+        // Attempt to create the document. If username auth was used, `firebaseUser.email` might be the dummy.
+        await createUserDocument(appUser, appUser.email); // Pass explicit email if needed
       }
       setCurrentUser(appUser);
       setUsers(prevUsers => { 
@@ -613,7 +641,6 @@ export default function ShapeTalkPage() {
               icon: Bot 
             };
             setDirectMessages(prev => [...prev, newDmChannel]);
-             // Ensure bot user is in users list
             if (!users.find(u => u.uid === targetId)) {
               setUsers(prev => [...prev, { uid: targetId, name: botInfo.name, avatarUrl: botInfo.avatarUrl, isBot: true, dataAiHint: 'bot avatar' }]);
             }
@@ -623,7 +650,6 @@ export default function ShapeTalkPage() {
           toast({ title: "Error", description: "Bot not found for interaction.", variant: "destructive" });
         }
       }
-      // Clean up query params after processing
       const newPath = pathname; 
       router.replace(newPath || '/');
       return; 
@@ -745,9 +771,9 @@ export default function ShapeTalkPage() {
         break;
       case 'auth/invalid-email': description = "The email address is not valid."; break;
       case 'auth/user-disabled': description = "This user account has been disabled."; break;
-      case 'auth/user-not-found': description = "No user found with this email. Sign up or check email."; break;
+      case 'auth/user-not-found': description = "No user found with this username/email. Sign up or check credentials."; break;
       case 'auth/wrong-password': description = "Incorrect password."; break;
-      case 'auth/email-already-in-use': description = "This email is already in use."; break;
+      case 'auth/email-already-in-use': description = "This email (or generated email for username) is already in use."; break;
       case 'auth/weak-password': description = "Password is too weak (min 6 characters)."; break;
       case 'auth/operation-not-allowed': description = "Email/password accounts not enabled in Firebase Console."; break;
       case 'auth/credential-already-in-use': description = "This credential is already associated with a different user account."; title = "Linking Failed"; break;
@@ -770,28 +796,30 @@ export default function ShapeTalkPage() {
       if (!userSnap.exists()) {
         await createUserDocument({
           uid: user.uid,
-          email: user.email,
+          email: user.email, // Google provides a real email
           name: user.displayName || user.email?.split('@')[0] || 'Anonymous User',
-          username: null,
+          username: null, // Username can be set later
           avatarUrl: user.photoURL || null,
           isBot:false,
           linkedAccounts: [{ 
             providerId: GoogleAuthProvider.PROVIDER_ID, 
-            uid: user.uid, 
+            uid: user.uid, // For Google, this is their Google UID
             email: user.email, 
             displayName: user.displayName 
           }],
           lastSeen: Date.now(), 
           isFounder: false,
           hasSetUsername: false,
-        });
+        }, user.email);
       } else {
          await updateDoc(userDocRef, { 
             name: user.displayName || userSnap.data()?.name,
             avatarUrl: user.photoURL || userSnap.data()?.avatarUrl,
+            // Ensure email is updated if it changed, or if Firestore one was dummy
+            email: user.email || userSnap.data()?.email,
             linkedAccounts: arrayUnion({ 
                 providerId: GoogleAuthProvider.PROVIDER_ID, 
-                uid: user.uid,
+                uid: user.uid, // For Google, this is their Google UID
                 email: user.email, 
                 displayName: user.displayName 
             }),
@@ -806,18 +834,23 @@ export default function ShapeTalkPage() {
     }
   };
 
-  const handleEmailPasswordSignIn = async (e?: React.FormEvent) => {
+  const handleUsernameSignIn = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!email || !password) {
-      setAuthError("Please enter both email and password.");
+    if (!authUsername || !authPassword) {
+      setAuthError("Please enter both username and password.");
       return;
     }
     setIsLoadingAuth(true);
     setAuthError(null);
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      await updateUserLastSeen(userCredential.user.uid);
-      toast({ title: "Logged In Successfully!" });
+      const userProfile = await getUserProfileByUsername(authUsername.trim());
+      if (userProfile && userProfile.email) { // userProfile.email here is the dummy email
+        const userCredential = await signInWithEmailAndPassword(auth, userProfile.email, authPassword);
+        await updateUserLastSeen(userCredential.user.uid);
+        toast({ title: "Logged In Successfully!" });
+      } else {
+        handleFirebaseAuthError({ code: 'auth/user-not-found' }, "Login");
+      }
     } catch (error: any) {
       handleFirebaseAuthError(error, "Login");
     } finally {
@@ -825,34 +858,46 @@ export default function ShapeTalkPage() {
     }
   };
 
-  const handleEmailPasswordSignUp = async (e?: React.FormEvent) => {
+  const handleUsernameSignUp = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!email || !password) {
-      setAuthError("Please enter both email and password to sign up.");
+    if (!authUsername || !authPassword) {
+      setAuthError("Please enter both username and password to sign up.");
       return;
     }
     setIsLoadingAuth(true);
     setAuthError(null);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const newName = email.split('@')[0];
+      const usernameExists = await checkUsernameExists(authUsername.trim());
+      if (usernameExists) {
+        handleFirebaseAuthError({ code: 'auth/username-already-in-use', message: "This username is already taken." }, "Sign Up");
+        setIsLoadingAuth(false);
+        return;
+      }
+
+      // Generate a dummy email for Firebase internal use
+      const dummyEmail = `${authUsername.trim().toLowerCase().replace(/[^a-z0-9_.-]/gi, '')}@shapetalk.username.app`;
+
+      const userCredential = await createUserWithEmailAndPassword(auth, dummyEmail, authPassword);
+      const newName = authUsername.trim();
       await updateProfile(userCredential.user, { displayName: newName });
+      
       await createUserDocument({
         uid: userCredential.user.uid,
-        email: userCredential.user.email,
+        email: dummyEmail, // Store the dummy email
         name: newName,
-        username: null,
+        username: newName, // Set username same as display name initially for username-based signup
         avatarUrl: null,
         isBot:false,
         linkedAccounts: [{ 
-            providerId: EmailAuthProvider.PROVIDER_ID, 
-            uid: userCredential.user.uid,
-            email: userCredential.user.email 
+            providerId: EmailAuthProvider.PROVIDER_ID, // Represents username/password auth
+            uid: userCredential.user.uid, // Firebase UID
+            email: dummyEmail // Store dummy email here too if needed for provider data consistency
         }],
         lastSeen: Date.now(), 
-        isFounder: false,
-        hasSetUsername: false,
-      });
+        isFounder: newName.toLowerCase() === 'xi.self13', // Check for founder status
+        hasSetUsername: true, // Username is set during this signup
+      }, dummyEmail); // Pass dummy email to createUserDocument
+
       toast({ title: "Signed Up Successfully!", description: "Welcome to ShapeTalk!" });
     } catch (error: any) {
       handleFirebaseAuthError(error, "Sign Up");
@@ -860,6 +905,7 @@ export default function ShapeTalkPage() {
         setIsLoadingAuth(false);
     }
   };
+
   const handleLogout = async () => {
     try {
       if(currentUser) await updateUserProfileInFirestore(currentUser.uid, { lastSeen: Date.now() }); 
@@ -1076,7 +1122,7 @@ export default function ShapeTalkPage() {
     setUsers(prevUsers => prevUsers.map(u => u.uid === newCurrentUser.uid ? newCurrentUser : u));
     if(updatedUserData.lastSeen) await updateUserLastSeen(currentUser.uid);
     if ('username' in updatedUserData || 'isFounder' in updatedUserData || 'hasSetUsername' in updatedUserData) {
-        await loadAllAppUsers(); // Refresh all users if username or founder status changes
+        await loadAllAppUsers(); 
     }
   };
 
@@ -1329,8 +1375,7 @@ export default function ShapeTalkPage() {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data(); 
         
-        // Check if timestamp exists and is a Firestore Timestamp
-        if (data && data.timestamp && typeof data.timestamp.toMillis === 'function') { 
+        if (data && data.timestamp && typeof data.timestamp?.toMillis === 'function') { 
           const indicatorTimestamp = data.timestamp.toMillis();
           const indicator: TypingIndicator = {
             userId: data.userId,
@@ -1346,20 +1391,16 @@ export default function ShapeTalkPage() {
             needsBatchCommit = true;
           }
         } else if (data && data.timestamp === null && data.userId !== currentUser?.uid) { 
-          // Handle cases where timestamp might be null (e.g. not yet set by serverTimestamp)
-          // This could happen if a document is created client-side then serverTimestamp resolves later.
-          // For simplicity, treat as currently typing if timestamp is null and not own user.
           const indicator: TypingIndicator = { 
             userId: data.userId,
             userName: data.userName,
             channelId: data.channelId,
-            timestamp: now // Use current time as a fallback to avoid indefinite display
+            timestamp: now 
           };
-          if (indicator.userId !== currentUser.uid) { // Double check it's not the current user
+          if (indicator.userId !== currentUser.uid) { 
              indicators.push(indicator);
           }
         } else if (data && data.timestamp && typeof data.timestamp === 'number' && data.userId !== currentUser.uid) {
-          // Handle cases where timestamp might already be a number (e.g. from client-side set on initial typing)
            const indicatorTimestamp = data.timestamp;
             const indicator: TypingIndicator = {
             userId: data.userId,
@@ -1391,6 +1432,9 @@ export default function ShapeTalkPage() {
   
   const activeChannelDetails = activeChannelId ? [...channels, ...directMessages].find(c => c.id === activeChannelId) : null;
 
+  if (showStartupScreen) {
+    return <StartupScreen onFinished={() => setShowStartupScreen(false)} />;
+  }
 
   if (isLoadingAuth && !currentUser) { 
     return (
@@ -1411,21 +1455,21 @@ export default function ShapeTalkPage() {
           <h2 className="text-2xl font-bold text-center mb-1">Welcome to ShapeTalk</h2>
           <p className="text-center text-muted-foreground mb-6">Chat with shapes, powered by AI.</p>
           
-          <form onSubmit={handleEmailPasswordSignIn} className="space-y-4 mb-4">
+          <form onSubmit={handleUsernameSignIn} className="space-y-4 mb-4">
             <div>
-              <Label htmlFor="email-signin">Email</Label>
-              <Input id="email-signin" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" required className="bg-input"/>
+              <Label htmlFor="username-signin">Username</Label>
+              <Input id="username-signin" type="text" value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} placeholder="your_username" required className="bg-input"/>
             </div>
             <div>
               <Label htmlFor="password-signin">Password</Label>
-              <Input id="password-signin" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required className="bg-input"/>
+              <Input id="password-signin" type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} placeholder="••••••••" required className="bg-input"/>
             </div>
             {authError && <p className="text-sm text-destructive">{authError}</p>}
             <div className="flex flex-col sm:flex-row gap-2">
                 <Button type="submit" className="flex-1" disabled={isLoadingAuth}>
                   {isLoadingAuth ? <Loader2 className="animate-spin" /> : <LogIn />} Sign In
                 </Button>
-                 <Button type="button" variant="outline" onClick={handleEmailPasswordSignUp} className="flex-1" disabled={isLoadingAuth}>
+                 <Button type="button" variant="outline" onClick={handleUsernameSignUp} className="flex-1" disabled={isLoadingAuth}>
                   {isLoadingAuth ? <Loader2 className="animate-spin" /> : <UserPlus />} Sign Up
                 </Button>
             </div>

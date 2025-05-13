@@ -1,25 +1,26 @@
+
 export interface User {
-  uid: string; // Firebase User ID or custom Bot ID
+  uid: string; 
   name: string | null; 
-  username?: string | null; // Unique, settable once
+  username?: string | null; 
   avatarUrl?: string | null; 
-  email?: string | null; // Firebase email, optional for bots
+  email?: string | null; // Made optional. Will store dummy email for username-only auth.
   isBot?: boolean; 
   dataAiHint?: string; 
   statusMessage?: string; 
   linkedAccounts?: Array<{ providerId: string; displayName?: string | null; email?: string | null; uid?: string; }>;
   shapesIncApiKey?: string;
   shapesIncUsername?: string;
-  lastSeen?: number | null; // Timestamp of last activity
-  entityType?: 'user'; // To help distinguish on discovery pages
-  isFounder?: boolean; // Special role for xi.self13
-  hasSetUsername?: boolean; // True if username has been set once
+  lastSeen?: number | null; 
+  entityType?: 'user'; 
+  isFounder?: boolean; 
+  hasSetUsername?: boolean; 
 }
 
 export interface Shape {
   id: string;
   name: string;
-  svgString: string; // Raw SVG string
+  svgString: string; 
 }
 
 export type MessageContent = 
@@ -53,7 +54,7 @@ export interface Channel {
   isAiLounge?: boolean; 
   isBotGroup?: boolean; 
   groupId?: string;
-  isUserDm?: boolean; // Indicates a DM between two regular users
+  isUserDm?: boolean; 
 }
 
 export interface BotConfig {
@@ -68,7 +69,6 @@ export interface BotConfig {
   greetingMessage?: string; 
 }
 
-// Represents an AI entity that can be discovered. Could be a platform-defined AI or a user-created public bot.
 export interface PlatformShape {
   id: string; 
   name: string; 
@@ -77,27 +77,24 @@ export interface PlatformShape {
   dataAiHint?: string;
   shapeUsername: string; 
   tags?: string[];
-  isUserCreated: boolean; // True if this is a user's public bot, false if official platform AI
-  ownerDisplayName?: string; // Only relevant if isUserCreated is true
+  isUserCreated: boolean; 
+  ownerDisplayName?: string; 
 }
 
 
 export interface DiscoverableEntity {
-  id: string; // User UID or Bot ID or Platform AI ID
+  id: string; 
   name: string;
-  username?: string; // Added username
-  description?: string; // For bots/AIs, or user status/bio
+  username?: string; 
+  description?: string; 
   avatarUrl?: string | null;
   dataAiHint?: string;
   entityType: 'user' | 'bot' | 'platformAI';
   tags: string[]; 
-  // Bot/PlatformAI specific
   shapeUsername?: string;
-  // User-created bot specific
   ownerDisplayName?: string;
-  // User specific (optional)
   statusMessage?: string;
-  isFounder?: boolean; // Added founder status
+  isFounder?: boolean; 
 }
 
 
